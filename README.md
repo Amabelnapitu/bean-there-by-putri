@@ -42,6 +42,18 @@ hangs off a bus route from Central.
 
 `data/cafes.csv` is a saved copy the site falls back to if the sheet can't be reached.
 
+### Keeping the APP tab in sync with the Cafe tab
+Keep reviewing in the **Cafe** tab as usual, then use the sheet menu **Bean There → Sync APP tab from Cafe tab**
+(or **Turn on auto-sync** so it runs after every edit). It only copies what changed:
+
+- A changed rating, price or order updates that café in the APP tab.
+- A changed review replaces the APP tab's Note with your new wording, highlighted in lilac so you can tidy it.
+- A new café is added to the APP tab (highlighted) and its location is looked up. Add Rank, Taste and Tags yourself.
+- Rank, Drink, Taste, Tags, Maps Link, Lat, Lng and reworded notes are never overwritten unless you change that café in the Cafe tab.
+
+Cafés are matched by district and name, and small typos are fine ("Haflway" still finds "Halfway Coffee").
+A hidden `_sync` tab remembers what the Cafe tab looked like last time; don't edit or delete it.
+
 ## Setup
 
 ### 1. Publish the APP tab (done)
