@@ -63,9 +63,9 @@
   // ---------- State ----------
 
   var cafes = [], open = [], districts = [];
-  var summary = { votes: {}, suggestions: [] };
+  var summary = { votes: {}, suggestions: [], recent: [], loaded: false, failed: false };
   var S = {
-    profile: load("bt-profile", null), myVotes: load("bt-votes", {}), myUps: load("bt-ups", {}),
+    profile: load("bt-profile", null), myVotes: load("bt-votes", {}), myUps: load("bt-ups", {}), commented: {},
     step: 0, draft: {}, brewing: false, pin: null, view: "map", query: "", mine: false,
     drink: "Espresso Tonic", crawlD: null, crawl: null, tagline: 0,
     fb: { type: "cafe", sent: false, error: "", busy: false, district: "" }
@@ -152,9 +152,9 @@
   function refreshSummary() {
     apiGet().then(function (s) {
       if (!s || !s.ok) return;
-      summary.votes = s.votes || {}; summary.suggestions = s.suggestions || [];
+      summary.votes = s.votes || {}; summary.suggestions = s.suggestions || []; summary.recent = s.recent || []; summary.loaded = true;
       route(true);
-    }).catch(function (e) { console.warn("Couldn't load votes.", e); });
+    }).catch(function (e) { summary.failed = true; console.warn("Couldn't load votes.", e); route(true); });
   }
 
   // ---------- Helpers ----------
@@ -168,6 +168,14 @@
   function inD(d) { return cafes.filter(function (c) { return c.district === d; }); }
   function picks(d) { return inD(d).filter(function (c) { return c.rank && !c.closed; }).sort(function (a, b) { return a.rank - b.rank; }).slice(0, 3); }
   function vkey(c) { return c.district + "|" + c.name; }
+  function cafeHref(c) { return "#c/" + slug(c.district) + "/" + slug(c.name); }
+  function timeAgo(t) {
+    var m = Math.max(0, Math.round((Date.now() - t) / 60000));
+    if (m < 1) return "just now";
+    if (m < 60) return m + " min ago";
+    var h = Math.round(m / 60); if (h < 24) return h + "h ago";
+    var d = Math.round(h / 24); return d === 1 ? "yesterday" : d + " days ago";
+  }
   function plural(n, w) { return n + " " + w + (n === 1 ? "" : "s"); }
   function chipsFor(c) {
     return c.taste.map(function (t) { return '<span class="chip">' + esc(TASTE[t] || t) + "</span>"; }).join("") +
@@ -270,32 +278,34 @@
 
   function votesFor(c) { var v = summary.votes[vkey(c)] || { agree: 0, disagree: 0 }; return { agree: v.agree, disagree: v.disagree }; }
 
-  function voteBlock(c) {
+  function voteBlock(c, withComment) {
     if (!API) return "";
     var v = votesFor(c), tot = v.agree + v.disagree, pct = tot ? Math.round(v.agree / tot * 100) : 0, m = S.myVotes[vkey(c)], k = esc(vkey(c));
     return '<div class="vote"><span class="vote-q">Been here? Do you agree with Putri?</span>' +
       '<div class="row-btns"><button class="pill" data-vote="agree" data-key="' + k + '" aria-pressed="' + (m === "agree") + '">👍 Agree</button>' +
       '<button class="pill" data-vote="disagree" data-key="' + k + '" aria-pressed="' + (m === "disagree") + '">👎 Nope</button></div>' +
       (tot ? '<div class="bar" role="img" aria-label="' + pct + '% agree"><i style="width:' + pct + '%"></i></div><small>' + v.agree + " of " + plural(tot, "friend") + " agree" + (m ? " (including you)" : "") + "</small>"
-        : "<small>No votes yet. Be the first!</small>") + "</div>";
+        : "<small>No votes yet. Be the first!</small>") +
+      (withComment && m && !S.commented[vkey(c)] ? '<form class="vote-comment" data-commentkey="' + k + '"><label class="field">Want to tell Putri why? <small>optional · only Putri sees this</small><textarea id="vote-comment" maxlength="300" placeholder="' + (m === "agree" ? "Totally, the…" : "Hmm, I thought…") + '"></textarea></label><button class="pill" type="submit">Send</button></form>' : "") +
+      (withComment && S.commented[vkey(c)] ? "<small>Thanks, Putri got your note.</small>" : "") + "</div>";
   }
 
   function card(c, i, opts) {
     opts = opts || {};
     var m = S.profile ? match(c, S.profile) : null;
     return '<article class="card"><div class="card-head"><span class="rank r' + (i + 1) + '">' + (i + 1) + "</span>" +
-      "<div><h3>" + esc(c.name) + '</h3><span class="meta">Putri ★ ' + (c.rating == null ? "–" : c.rating) + (opts.district ? " · " + esc(c.district) : "") + "</span></div>" +
+      "<div><h3><a class=\"cafe-link\" href=\"" + cafeHref(c) + "\">" + esc(c.name) + '</a></h3><span class="meta">Putri ★ ' + (c.rating == null ? "–" : c.rating) + (opts.district ? " · " + esc(c.district) : "") + "</span></div>" +
       (m ? '<span class="match" title="Your Taste Match">' + m.score + "%</span>" : "") + "</div>" +
       (c.order ? '<p class="order">Get: <b>' + esc(c.order) + "</b>" + (price(c) ? ' <span class="meta">· ' + esc(price(c)) + "</span>" : "") + "</p>" : "") +
       (c.note ? '<p class="note">“' + esc(c.note) + "”</p>" : "") +
       (m && m.why.length ? '<div class="chips">' + m.why.map(function (w) { return '<span class="chip ' + w[0] + '">' + esc(w[1]) + "</span>"; }).join("") + "</div>" : (c.taste.length || c.tags.length ? '<div class="chips">' + chipsFor(c) + "</div>" : "")) +
-      '<div class="row-btns"><a class="pill solid" href="' + esc(mapsUrl(c)) + '" target="_blank" rel="noopener">📍 Open in Maps</a></div>' +
+      '<div class="row-btns"><a class="pill solid" href="' + esc(mapsUrl(c)) + '" target="_blank" rel="noopener">📍 Open in Maps</a><a class="pill" href="' + cafeHref(c) + '">View café →</a></div>' +
       (opts.noVote ? "" : voteBlock(c)) + "</article>";
   }
 
   function restList(list) {
     return '<ul class="list">' + list.map(function (c) {
-      return '<li class="' + (c.closed ? "is-closed" : "") + '"><a class="row" href="' + esc(mapsUrl(c)) + '" target="_blank" rel="noopener"><span class="n">·</span><div><b>' + esc(c.name) + (c.closed ? " (closed)" : "") + "</b><small>" + esc(c.order) + (c.note ? " · “" + esc(c.note) + "”" : "") + '</small></div><span class="score">' +
+      return '<li class="' + (c.closed ? "is-closed" : "") + '"><a class="row" href="' + cafeHref(c) + '"><span class="n">·</span><div><b>' + esc(c.name) + (c.closed ? " (closed)" : "") + "</b><small>" + esc(c.order) + (c.note ? " · “" + esc(c.note) + "”" : "") + '</small></div><span class="score">' +
         (S.profile && !c.closed ? match(c, S.profile).score + "%" : c.rating != null ? "★ " + c.rating : "") + "</span></a></li>";
     }).join("") + "</ul>";
   }
@@ -398,7 +408,7 @@
       '<p class="sub">Your best matches across Hong Kong.</p></div>' +
       ranked.slice(0, 3).map(function (x, i) { return card(x.c, i, { district: true }); }).join("") +
       (flips.length ? '<span class="label">Putri’s loss, your gain</span><ul class="list">' + flips.map(function (x) {
-        return '<li><a class="row" href="#d/' + slug(x.c.district) + '"><span class="n">✦</span><div><b>' + esc(x.c.name) + "</b><small>Putri gave it ★ " + x.c.rating + " · " + esc(x.c.district) + '</small></div><span class="score">' + x.m.score + "%</span></a></li>";
+        return '<li><a class="row" href="' + cafeHref(x.c) + '"><span class="n">✦</span><div><b>' + esc(x.c.name) + "</b><small>Putri gave it ★ " + x.c.rating + " · " + esc(x.c.district) + '</small></div><span class="score">' + x.m.score + "%</span></a></li>";
       }).join("") + "</ul>" : "") +
       '<div class="row-btns"><a class="pill solid" href="#map">See my matches on the map →</a><a class="pill" href="#match">Retake the quiz</a></div></div>';
   }
@@ -418,9 +428,9 @@
         '<div class="sheet"><div class="h-row"><div><h2 style="font-size:22px">' + esc(d) + '</h2><span class="meta">' + plural(inD(d).length, "café") + ' tried</span></div><a class="pill solid" href="#d/' + slug(d) + '">Open →</a></div>' +
         '<span class="label">' + (searching ? "Matches here" : "Putri’s top 3") + "</span>" +
         (list.length ? list.slice(0, 3).map(function (c, i) {
-          return '<div class="mini"><span class="rank r' + (i + 1) + '">' + (searching ? "·" : i + 1) + "</span><span><b>" + esc(c.name) + '</b><br><small class="meta">' + esc(c.order) + '</small></span><span class="score">' + (S.profile && !c.closed ? match(c, S.profile).score + "%" : c.rating != null ? "★ " + c.rating : "") + "</span></div>";
+          return '<a class="mini" href="' + cafeHref(c) + '"><span class="rank r' + (i + 1) + '">' + (searching ? "·" : i + 1) + "</span><span><b>" + esc(c.name) + '</b><br><small class="meta">' + esc(c.order) + '</small></span><span class="score">' + (S.profile && !c.closed ? match(c, S.profile).score + "%" : c.rating != null ? "★ " + c.rating : "") + "</span></a>";
         }).join("") : '<p class="sub">' + (searching ? "Nothing here for that search." : "No favourite yet. Putri’s still looking.") + "</p>") +
-        (best ? '<div class="banner"><span class="ico" aria-hidden="true">' + persona(S.profile).emoji + "</span><span><b>Best for you: " + esc(best.c.name) + "</b><small>" + best.s + "% match</small></span></div>" : "") + "</div>";
+        (best ? '<a class="banner" href="' + cafeHref(best.c) + '"><span class="ico" aria-hidden="true">' + persona(S.profile).emoji + "</span><span><b>Best for you: " + esc(best.c.name) + "</b><small>" + best.s + "% match</small></span></a>" : "") + "</div>";
       if (!S.profile) html += '<a class="banner" href="#match"><span class="ico" aria-hidden="true">✨</span><span><b>Take the 20-second Taste Match</b><small>See which café in each district suits you</small></span></a>';
       html += '<a class="banner" href="#note" data-fbgo="cafe" data-fbdistrict="' + esc(d) + '"><span class="ico" aria-hidden="true">💌</span><span><b>Know a spot Putri hasn’t tried in ' + esc(d) + '?</b><small>Suggest it and she’ll add it to her list</small></span></a>';
       return html + "</div>";
@@ -428,7 +438,7 @@
 
     if (searching) {
       html += hits.length ? '<ul class="list">' + hits.slice(0, 40).map(function (c) {
-        return '<li class="' + (c.closed ? "is-closed" : "") + '"><a class="row" href="#d/' + slug(c.district) + '"><span class="n">' + (c.rank || "·") + "</span><div><b>" + esc(c.name) + (c.closed ? " (closed)" : "") + "</b><small>" + esc(c.district) + " · " + esc(c.order) + '</small></div><span class="score">' +
+        return '<li class="' + (c.closed ? "is-closed" : "") + '"><a class="row" href="' + cafeHref(c) + '"><span class="n">' + (c.rank || "·") + "</span><div><b>" + esc(c.name) + (c.closed ? " (closed)" : "") + "</b><small>" + esc(c.district) + " · " + esc(c.order) + '</small></div><span class="score">' +
           (S.profile && !c.closed ? match(c, S.profile).score + "%" : c.rating != null ? "★ " + c.rating : "") + "</span></a></li>";
       }).join("") + "</ul>" : '<p class="sub">Nothing yet. Try “tonic”, “cozy” or “cheap”.</p>';
       return html + "</div>";
@@ -459,6 +469,37 @@
     else if (list.length) html += list.map(function (c, i) { return card(c, i); }).join("");
     else html += '<p class="sub">Putri hasn’t found a favourite here yet, but here’s everything she’s tried.</p>';
     if (rest.length) html += '<span class="label">Everything else (' + rest.length + ")</span>" + restList(rest);
+    return html + "</div>";
+  }
+
+  function viewCafe(c) {
+    var m = S.profile && !c.closed ? match(c, S.profile) : null;
+    var others = inD(c.district).filter(function (x) { return x !== c; }).sort(function (a, b) {
+      if (a.closed !== b.closed) return a.closed ? 1 : -1;
+      return (a.rank || 9) - (b.rank || 9) || (b.rating || 0) - (a.rating || 0);
+    });
+    var sameDrink = open.filter(function (x) { return x !== c && x.drink === c.drink && c.drink !== "Other" && x.district !== c.district; })
+      .sort(function (a, b) { return (b.rating || 0) - (a.rating || 0); }).slice(0, 3);
+    var isTop = c.rank && c.rank <= 3 && !c.closed;
+    var html = '<div class="pad"><a class="back" href="#d/' + slug(c.district) + '">← ' + esc(c.district) + "</a>" +
+      '<div class="cafe-hero"><div class="h-row" style="align-items:flex-start"><div style="min-width:0">' +
+      (isTop ? '<span class="label" style="margin:0">Putri’s #' + c.rank + " in " + esc(c.district) + "</span>" : "") +
+      '<h1 class="app-title">' + esc(c.name) + "</h1>" +
+      '<p class="sub">' + esc(c.district) + (c.closed ? " · closed" : "") + "</p></div>" +
+      (m ? '<span class="match" title="Your Taste Match">' + m.score + "%</span>" : "") + "</div>" +
+      '<div class="cafe-facts"><div><small>Putri’s rating</small><b>' + (c.rating != null ? "★ " + c.rating : "–") + "</b></div>" +
+      "<div><small>Order</small><b>" + esc(c.order || "–") + "</b></div>" +
+      "<div><small>Price</small><b>" + esc(price(c) || "–") + "</b></div></div></div>" +
+      (c.note ? '<blockquote class="cafe-note">“' + esc(c.note) + "”<small>Putri</small></blockquote>" : "") +
+      (c.taste.length || c.tags.length ? '<div class="chips">' + chipsFor(c) + "</div>" : "") +
+      (m && m.why.length ? '<span class="label">Why it’s ' + m.score + "% for you</span>" + '<div class="chips">' + m.why.map(function (w) { return '<span class="chip ' + w[0] + '">' + esc(w[1]) + "</span>"; }).join("") + "</div>"
+        : !S.profile ? '<a class="banner" href="#match"><span class="ico" aria-hidden="true">✨</span><span><b>Is this one for you?</b><small>Take the 20-second Taste Match to see your % match</small></span></a>' : "") +
+      '<div class="row-btns"><a class="pill solid" href="' + esc(mapsUrl(c)) + '" target="_blank" rel="noopener">📍 Open in Maps</a>' +
+      (c.closed ? "" : '<button class="pill" data-crawlfrom="' + c.id + '">🚶 Start a crawl here</button>') +
+      '<button class="pill" data-share="1">Share</button></div>' +
+      (c.closed ? "" : voteBlock(c, true));
+    if (others.length) html += '<span class="label">More in ' + esc(c.district) + "</span>" + restList(others.slice(0, 6));
+    if (sameDrink.length) html += '<span class="label">Other ' + esc(c.drink.toLowerCase()) + "s Putri rates</span>" + restList(sameDrink);
     return html + "</div>";
   }
 
@@ -496,7 +537,7 @@
         return '<div class="hrow' + (counts[i] === max ? " peak" : "") + '"><span>★ ' + b[0] + '</span><span class="htrack"><i style="width:' + (counts[i] / max * 100) + '%"></i></span><span>' + counts[i] + "</span></div>";
       }).join("") + (mode === "3.7" ? '<p class="hnote">Her most common score is 3.7. Translation: “it’s fine, I guess.”</p>' : "") + "</div>" +
       (fives.length ? '<span class="label">Hall of fame</span><div class="fame">' + fives.map(function (c) {
-        return '<a href="#d/' + slug(c.district) + '"><span class="stars">★★★★★</span><b>' + esc(c.name) + "</b><small>" + esc(c.district) + " · " + esc(c.order) + "</small></a>";
+        return '<a href="' + cafeHref(c) + '"><span class="stars">★★★★★</span><b>' + esc(c.name) + "</b><small>" + esc(c.district) + " · " + esc(c.order) + "</small></a>";
       }).join("") + "</div>" : "") +
       (peeves.length ? '<span class="label">Things that make Putri sigh</span><div class="peeve">' + peeves.map(function (p) { return "<span>" + esc(p[0]) + " <b>×" + p[1] + "</b></span>"; }).join("") + "</div>" : "") +
       '<span class="label">Putri’s power rankings</span><div class="chips" role="group" aria-label="Drink">' + DRINKS.map(function (k) {
@@ -505,10 +546,10 @@
       '<div class="quote">“' + esc(DRINK_VOICE[S.drink]) + "”<small>" + plural(list.length, "café") + " · ranked by Putri</small></div>" +
       list.slice(0, 3).map(function (c, i) { return card(c, i, { district: true, noVote: true }); }).join("") +
       (list.length > 3 ? '<ul class="list">' + list.slice(3).map(function (c, i) {
-        return '<li><a class="row" href="#d/' + slug(c.district) + '"><span class="n">' + (i + 4) + "</span><div><b>" + esc(c.name) + "</b><small>" + esc(c.district) + (price(c) ? " · " + esc(price(c)) : "") + '</small></div><span class="score">★ ' + c.rating + "</span></a></li>";
+        return '<li><a class="row" href="' + cafeHref(c) + '"><span class="n">' + (i + 4) + "</span><div><b>" + esc(c.name) + "</b><small>" + esc(c.district) + (price(c) ? " · " + esc(price(c)) : "") + '</small></div><span class="score">★ ' + c.rating + "</span></a></li>";
       }).join("") + "</ul>" : "") +
       (shame.length ? '<span class="label">Hall of shame (so you don’t repeat my mistakes)</span><ul class="list">' + shame.map(function (c) {
-        return '<li><span class="n">✗</span><div><b>' + esc(c.name) + "</b><small>" + esc(c.district) + " · “" + esc(c.note) + '”</small></div><span class="score">★ ' + c.rating + "</span></li>";
+        return '<li><a class="row" href="' + cafeHref(c) + '"><span class="n">✗</span><div><b>' + esc(c.name) + "</b><small>" + esc(c.district) + " · “" + esc(c.note) + '”</small></div><span class="score">★ ' + c.rating + "</span></a></li>";
       }).join("") + "</ul>" : "") +
       '<a class="banner" href="#note" data-fbgo="hi"><span class="ico" aria-hidden="true">💌</span><span><b>Send Putri a note</b><small>Suggest a café, share an idea, report a bug or just say hi</small></span></a></div>';
   }
@@ -535,7 +576,7 @@
       '<div class="meter"><div class="h-row"><b>☕ ' + mg + ' mg caffeine</b><small class="meta">daily limit ~400 mg</small></div>' +
       '<div class="meter-bar' + (mg > 400 ? " over" : "") + '" role="img" aria-label="' + mg + ' of 400 milligrams"><i style="width:' + Math.min(100, mg / 400 * 100) + '%"></i></div><small>' + esc(mood) + "</small></div>" +
       (sel.length ? '<span class="label">Your route · about HK$' + spend + '</span><div class="route">' + sel.map(function (c, i) {
-        return "<div><span>" + (i + 1) + '</span><p style="margin:0"><b>' + esc(c.name) + '</b><br><small class="meta">Get: ' + esc(c.order) + "</small></p></div>";
+        return "<div><span>" + (i + 1) + '</span><p style="margin:0"><b><a class="cafe-link" href="' + cafeHref(c) + '">' + esc(c.name) + '</a></b><br><small class="meta">Get: ' + esc(c.order) + "</small></p></div>";
       }).join("") + "</div>" : "") +
       (url ? '<a class="pill solid" style="text-align:center;padding:10px" href="' + esc(url) + '" target="_blank" rel="noopener">🚶 Open walking route in Google Maps</a>' : '<p class="sub">Pick at least 2 stops to get a route.</p>') + "</div>";
   }
@@ -543,14 +584,21 @@
   function viewVotes() {
     var html = '<div class="pad"><h1 class="app-title">Putri vs You</h1><p class="sub">Friends vote on whether Putri got it right.</p>';
     if (!API) return html + '<div class="soon">🗳️ Voting opens soon. Putri is still setting up the ballot box.</div></div>';
+    if (summary.failed) return html + '<div class="soon">Couldn’t load the votes right now. Try again in a bit.</div></div>';
+    if (!summary.loaded) return html + '<p class="sub">Counting votes…</p></div>';
     var rated = open.map(function (c) { var v = votesFor(c); return { c: c, v: v, tot: v.agree + v.disagree, pct: v.agree / Math.max(1, v.agree + v.disagree) }; }).filter(function (x) { return x.tot > 0; });
     var all = rated.reduce(function (s, x) { s.a += x.v.agree; s.t += x.tot; return s; }, { a: 0, t: 0 });
-    if (all.t < 3) return html + '<div class="soon">Not enough votes yet. Open any café card and tap 👍 or 👎 to get things started.</div><a class="pill solid" href="#map">Find a café to vote on →</a></div>';
+    var recent = summary.recent.map(function (r) {
+      var c = cafes.filter(function (x) { return x.district === r.district && x.name === r.cafe; })[0];
+      return c ? '<li><a class="row" href="' + cafeHref(c) + '"><span class="n">' + (r.verdict === "agree" ? "👍" : "👎") + "</span><div><b>" + esc(c.name) + "</b><small>" + esc(c.district) + " · " + (r.verdict === "agree" ? "agreed with" : "disagreed with") + " Putri’s ★ " + c.rating + '</small></div><span class="meta">' + timeAgo(r.time) + "</span></a></li>" : "";
+    }).join("");
+    var feed = recent ? '<span class="label">🕒 Latest votes</span><ul class="list">' + recent + "</ul>" : "";
+    if (all.t < 3) return html + '<div class="soon">Not enough votes yet. Open any café and tap 👍 or 👎 to get things started.</div>' + feed + '<a class="pill solid" href="#map">Find a café to vote on →</a></div>';
     var contro = rated.filter(function (x) { return x.tot >= 2; }).sort(function (a, b) { return Math.abs(a.pct - 0.5) - Math.abs(b.pct - 0.5) || b.tot - a.tot; }).slice(0, 4);
     var harsh = rated.filter(function (x) { return x.c.rating != null && x.c.rating <= 3.7 && x.v.disagree > 0; }).sort(function (a, b) { return b.v.disagree - a.v.disagree; }).slice(0, 3);
     var solid = rated.filter(function (x) { return x.tot >= 2 && x.pct >= .75; }).sort(function (a, b) { return b.pct - a.pct || b.tot - a.tot; }).slice(0, 3);
-    function li(x, right) { return '<li><a class="row" href="#d/' + slug(x.c.district) + '"><span class="n">·</span><div><b>' + esc(x.c.name) + "</b><small>" + esc(x.c.district) + " · Putri ★ " + x.c.rating + '</small></div><span class="score">' + right + "</span></a></li>"; }
-    html += '<div class="stat big"><b>' + Math.round(all.a / all.t * 100) + "%</b><small>of the time, friends agree with Putri (" + plural(all.t, "vote") + ")</small></div>";
+    function li(x, right) { return '<li><a class="row" href="' + cafeHref(x.c) + '"><span class="n">·</span><div><b>' + esc(x.c.name) + "</b><small>" + esc(x.c.district) + " · Putri ★ " + x.c.rating + '</small></div><span class="score">' + right + "</span></a></li>"; }
+    html += '<div class="stat big"><b>' + Math.round(all.a / all.t * 100) + "%</b><small>of the time, friends agree with Putri (" + plural(all.t, "vote") + ")</small></div>" + feed;
     if (contro.length) html += '<span class="label">🔥 Most controversial</span><ul class="list">' + contro.map(function (x) { return li(x, x.v.agree + "–" + x.v.disagree); }).join("") + "</ul>";
     if (harsh.length) html += '<span class="label">💎 Friends say Putri was too harsh</span><ul class="list">' + harsh.map(function (x) { return li(x, x.v.disagree + " 👎"); }).join("") + "</ul>";
     if (solid.length) html += '<span class="label">🤝 Everyone agrees</span><ul class="list">' + solid.map(function (x) { return li(x, Math.round(x.pct * 100) + "%"); }).join("") + "</ul>";
@@ -602,6 +650,11 @@
     var h = decodeURIComponent(location.hash.replace(/^#\/?/, ""));
     if (!h) return { name: "landing" };
     if (h.indexOf("d/") === 0) { var d = districtFromSlug(h.slice(2)); return d ? { name: "district", d: d } : { name: "map" }; }
+    if (h.indexOf("c/") === 0) {
+      var parts = h.slice(2).split("/"), cd = districtFromSlug(parts[0]);
+      var cafe = cd && cafes.filter(function (x) { return x.district === cd && slug(x.name) === parts[1]; })[0];
+      return cafe ? { name: "cafe", c: cafe } : { name: "map" };
+    }
     if (["map", "match", "results", "putri", "crawl", "votes", "note"].indexOf(h) !== -1) return { name: h };
     var legacy = districtFromSlug(h); // old links like #sheung-wan
     return legacy ? { name: "district", d: legacy } : { name: "landing" };
@@ -609,7 +662,7 @@
 
   var lastRoute = "";
   function route(keepScroll) {
-    var r = parseHash(), key = r.name + (r.d || "");
+    var r = parseHash(), key = r.name + (r.d || "") + (r.c ? r.c.id : "");
     if (key !== lastRoute) { keepScroll = false; if (r.name === "match" && !S.brewing) { S.step = 0; S.draft = {}; } }
     lastRoute = key;
     if (r.name === "results" && !S.profile) { location.replace("#match"); return; }
@@ -619,6 +672,7 @@
     else if (r.name === "results") { html = viewResults(); title = "My Taste Match · " + title; }
     else if (r.name === "map") { html = viewMap(); title = "Map · " + title; }
     else if (r.name === "district") { S.pin = r.d; html = viewDistrict(r.d); title = r.d + " · " + title; navKey = "map"; }
+    else if (r.name === "cafe") { S.pin = r.c.district; html = viewCafe(r.c); title = r.c.name + " · " + title; navKey = "map"; }
     else if (r.name === "putri") { html = viewPutri(); title = "Putri’s Palate · " + title; }
     else if (r.name === "crawl") { html = viewCrawl(); title = "Coffee Crawl · " + title; }
     else if (r.name === "votes") { html = viewVotes(); title = "Putri vs You · " + title; }
@@ -686,6 +740,17 @@
     if (d.mine) { S.mine = d.mine === "1"; route(true); return; }
     if (d.drink) { S.drink = d.drink; route(true); return; }
     if (d.vote) { castVote(d.key, d.vote); return; }
+    if (d.share) { document.getElementById("share-btn").click(); return; }
+    if (d.crawlfrom) {
+      var cf = cafes.filter(function (x) { return x.id === +d.crawlfrom; })[0];
+      if (cf) {
+        S.crawlD = cf.district;
+        var rest = inD(cf.district).filter(function (x) { return !x.closed && x !== cf; }).sort(function (a, b) { return (a.rank || 9) - (b.rank || 9) || (b.rating || 0) - (a.rating || 0); });
+        S.crawl = [cf.id].concat(rest.slice(0, 2).map(function (x) { return x.id; }));
+        location.hash = "#crawl";
+      }
+      return;
+    }
     if (d.fbtype) { S.fb.type = d.fbtype; S.fb.error = ""; route(true); return; }
     if (d.fbnew) { S.fb.sent = false; route(true); return; }
     if (d.up) {
@@ -727,6 +792,19 @@
   });
 
   document.addEventListener("submit", function (e) {
+    var ck = e.target.dataset && e.target.dataset.commentkey;
+    if (ck) {
+      e.preventDefault();
+      var txt = (document.getElementById("vote-comment") || {}).value || "";
+      txt = txt.trim();
+      if (!txt) return;
+      var verdict = S.myVotes[ck], parts = ck.split("|");
+      S.commented[ck] = true; route(true);
+      apiPost({ action: "vote", district: parts[0], name: parts.slice(1).join("|"), verdict: verdict, comment: txt })
+        .then(function (res) { if (res && res.error) toast(res.error); })
+        .catch(function () { toast("Couldn’t send your note. Check your connection."); });
+      return;
+    }
     if (e.target.id !== "fbform") return;
     e.preventDefault();
     var val = function (id) { var el = document.getElementById(id); return el ? el.value.trim() : ""; };

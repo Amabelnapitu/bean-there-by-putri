@@ -12,6 +12,8 @@
 
 // Optional: put your email here to get a copy of every new note.
 var NOTIFY_EMAIL = '';
+// Optional: set to true to also get an email for every vote (needs NOTIFY_EMAIL).
+var NOTIFY_VOTES = false;
 
 var VOTE_HEADERS = ['Timestamp', 'Device', 'District', 'Café', 'Verdict', 'Comment'];
 var FEEDBACK_HEADERS = ['Timestamp', 'Device', 'Type', 'Café', 'District', 'Message', 'Name', 'Status', "Putri's Rating", 'Approved'];
@@ -58,6 +60,11 @@ function vote_(body, device) {
   if (tooFast_('vote:' + device, 2)) return { ok: false, error: 'Easy there! Try again in a second.' };
 
   sheet_('Votes', VOTE_HEADERS).appendRow([new Date(), safe_(device), safe_(district), safe_(cafe), verdict, safe_(clean_(body.comment, 300))]);
+  var comment = clean_(body.comment, 300);
+  if (NOTIFY_EMAIL && NOTIFY_VOTES && verdict !== 'none') {
+    var line = (verdict === 'agree' ? '👍 Agrees' : '👎 Disagrees') + ' with you on ' + cafe + ' (' + district + ')';
+    try { MailApp.sendEmail(NOTIFY_EMAIL, 'Bean There: ' + line, line + (comment ? '\n\nThey said: ' + comment : '')); } catch (err) { /* email is optional */ }
+  }
   var tally = voteTally_()[key_(district, cafe)] || { agree: 0, disagree: 0 };
   return { ok: true, votes: tally };
 }
@@ -98,7 +105,7 @@ function upvote_(body, device) {
 // ---------- Summary (read by the site) ----------
 
 function summary_() {
-  return { ok: true, votes: voteTally_(), suggestions: suggestions_() };
+  return { ok: true, votes: voteTally_(), suggestions: suggestions_(), recent: recentVotes_(15) };
 }
 
 function voteTally_() {
@@ -113,6 +120,19 @@ function voteTally_() {
     tally[v.key][v.verdict] += 1;
   });
   return tally;
+}
+
+// Latest votes for the activity feed. Comments stay private in the sheet.
+function recentVotes_(limit) {
+  var rows = rows_('Votes'), out = [], seen = {};
+  for (var i = rows.length - 1; i >= 0 && out.length < limit; i--) {
+    var r = rows[i], k = r[1] + '|' + key_(r[2], r[3]);
+    if (seen[k]) continue; // only each phone's latest vote per café
+    seen[k] = 1;
+    if (r[4] !== 'agree' && r[4] !== 'disagree') continue;
+    out.push({ district: String(r[2]), cafe: String(r[3]), verdict: r[4], time: new Date(r[0]).getTime() });
+  }
+  return out;
 }
 
 function suggestions_() {

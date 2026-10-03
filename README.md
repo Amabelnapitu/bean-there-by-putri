@@ -7,7 +7,8 @@ Putri's honest coffee picks around Hong Kong.
 - **District pages:** Putri's top 3, or "Best for me" sorted by the visitor's match.
 - **Putri's Palate:** stats, rating habits, hall of fame/shame and power rankings per drink, all calculated from the sheet.
 - **Coffee Crawl:** pick 2–4 stops, get a caffeine meter and a Google Maps walking route.
-- **Putri vs You:** friends vote 👍/👎 on Putri's verdicts.
+- **Café pages:** every café has its own page (`#c/<district>/<café>`), linked from every list, card, search result and the map.
+- **Putri vs You:** friends vote 👍/👎 on Putri's verdicts, with an optional private note. The Votes screen shows a live "Latest votes" feed.
 - **Send Putri a note:** café suggestions (feeding a to-try list friends can upvote), ideas, bugs, hellos.
 
 A static site (HTML + CSS + JS, no build step) on GitHub Pages. Café data comes from the
@@ -47,7 +48,7 @@ hangs off a bus route from Central.
 ### 2. Votes and notes: deploy the Apps Script
 1. Open the **Review** sheet → **Extensions → Apps Script**.
 2. Delete what's there and paste in everything from `apps-script/Code.gs`. Click **Save**.
-3. Optional: set `NOTIFY_EMAIL` at the top to your email to get a copy of every note.
+3. Optional: set `NOTIFY_EMAIL` at the top to your email to get a copy of every note. Also set `NOTIFY_VOTES = true` to get an email for every vote (with the voter's note, if they left one).
 4. **Deploy → New deployment** → gear icon → **Web app**.
    - Execute as: **Me**
    - Who has access: **Anyone**
@@ -58,7 +59,7 @@ Until `apiUrl` is set, the votes and note screens say "opening soon"; everything
 
 The script creates these tabs in the sheet on first use:
 
-- **Votes:** Timestamp · Device · District · Café · Verdict · Comment. Only each phone's latest vote per café counts.
+- **Votes:** Timestamp · Device · District · Café · Verdict · Comment. Only each phone's latest vote per café counts. Comments are private: they only appear in this tab.
 - **Feedback:** Timestamp · Device · Type · Café · District · Message · Name · Status · Putri's Rating · Approved.
   - Café suggestions only show on the to-try list once you type `yes` in **Approved**.
   - Set **Status** to `tried` (and optionally fill **Putri's Rating**) to show "Tried ✓".
