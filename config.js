@@ -5,5 +5,5 @@ window.BEAN_THERE_CONFIG = {
 
   // Web app URL of the Apps Script in apps-script/Code.gs (see README).
   // While this is empty, Putri vs You votes and "Send Putri a note" show as coming soon.
-  apiUrl: ""
+  apiUrl: "https://script.google.com/macros/s/AKfycbwalAN5rvxvjh6Q-sFNy-2XfcP6ozJM5DAv3e2muvfBkthYB-H9IcOZEZrXyKx5CWAm/exec"
 };
