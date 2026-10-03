@@ -6,7 +6,8 @@ Putri's honest coffee picks around Hong Kong.
 - **MTR map:** districts drawn as stations on the Island and Tsuen Wan lines, with search that lights up matching stations.
 - **District pages:** Putri's top 3, or "Best for me" sorted by the visitor's match.
 - **Putri's Palate:** stats, rating habits, hall of fame/shame and power rankings per drink, all calculated from the sheet.
-- **Coffee Crawl:** pick 2–4 stops, get a caffeine meter and a Google Maps walking route.
+- **Coffee Crawl:** pick an area (Island West, Island East, South side, Kowloon or your saved list) and up to 5 stops. The app suggests an order (along the MTR line, or shortest path when coordinates are known); visitors can move stops ↑/↓ or remove them. Opens the whole route in Google Maps, with MTR/walking links between stops.
+- **My list:** visitors tap ♡ Save on any café. Saved cafés and their quiz result stay on their phone with no login; "Copy my list link" gives a link that restores the list on any device or shares it with a friend.
 - **Café pages:** every café has its own page (`#c/<district>/<café>`), linked from every list, card, search result and the map.
 - **Putri vs You:** friends vote 👍/👎 on Putri's verdicts, with an optional private note. The Votes screen shows a live "Latest votes" feed.
 - **Send Putri a note:** café suggestions (feeding a to-try list friends can upvote), ideas, bugs, hellos.
@@ -31,6 +32,7 @@ One row per café:
 | Taste | `milky`, `strong`, `smooth`, `weak`, `nutty`, `chocolatey`, `fruity`, `roasty` (separate with `;`) | milky;nutty |
 | Tags | `work-friendly`, `cozy`, `cute`, `takeaway-only`, `small-space`, `small-portion`, `no-ports`, `time-limit`, `cheap`, `pricey`, `cash-only`, `closed` | cozy;cheap |
 | Maps Link | Optional Google Maps link (otherwise the app searches by name + district) | https://maps.app.goo.gl/… |
+| Lat, Lng | Optional. In Google Maps, long-press the café and copy the numbers. With these, the crawl picks the shortest walking order and shows distances | 22.2866, 114.1500 |
 
 Taste Match uses Rating, Drink, Taste and the `cheap`/`pricey` tags. Closed cafés never show as a top pick.
 

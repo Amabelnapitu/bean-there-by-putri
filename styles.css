@@ -346,3 +346,26 @@ body.has-nav main { padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bott
 .cafe-note small { display: block; margin-top: 6px; font-family: var(--f-hand); font-size: 15px; letter-spacing: .06em; color: var(--muted); }
 .vote-comment { display: grid; gap: 6px; }
 .vote-comment textarea { min-height: 64px; }
+
+/* ---------- Saved list ---------- */
+.topbar .saved-link { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--accent); font-weight: 700; font-size: 14px; text-decoration: none; }
+.topbar .saved-link[aria-current="page"] { background: var(--accent-soft); }
+.pill.save[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--lilac-300); }
+.icon-btn { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; width: 32px; height: 32px; display: inline-grid; place-items: center; font-size: 14px; color: var(--fg); padding: 0; }
+.icon-btn:disabled { opacity: .35; cursor: default; }
+.list li .icon-btn { justify-self: end; }
+
+/* ---------- Crawl by region ---------- */
+.stops-group { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+.stops-group summary { cursor: pointer; padding: 10px 14px; font-weight: 700; list-style: none; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.stops-group summary::-webkit-details-marker { display: none; }
+.stops-group summary::after { content: "▾"; color: var(--muted); }
+.stops-group[open] summary::after { transform: rotate(180deg); }
+.stops-group .list { border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+.route-edit { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.route-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 8px 10px; }
+.route-row .num { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--accent-fg); display: grid; place-items: center; font-weight: 800; font-size: 13px; }
+.route-row .who { display: grid; min-width: 0; }
+.route-row .who b { font-size: 14px; }
+.route-row .moves { display: flex; gap: 4px; }
+.leg { display: block; margin: 0 0 6px 13px; padding-left: 20px; border-left: 2px dotted var(--lilac-300); font-size: 12.5px; font-weight: 600; text-decoration: none; color: var(--accent); }

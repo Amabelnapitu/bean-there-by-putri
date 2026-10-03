@@ -12,6 +12,14 @@
     "Fortress Hill", "North Point", "Quarry Bay", "Taikoo", "Sai Wan Ho", "Shau Kei Wan", "Heng Fa Chuen", "Chai Wan"];
   var TW_LINE = ["Tsim Sha Tsui", "Jordan", "Yau Ma Tei", "Mong Kok", "Prince Edward", "Sham Shui Po", "Cheung Sha Wan", "Lai Chi Kok", "Mei Foo", "Tsuen Wan"];
   var STATION_NAMES = { "Taikoo": "Tai Koo" };
+  // Crawl regions, each in walking order (west to east, or south to north in Kowloon).
+  var REGIONS = [
+    { id: "west", name: "Island West", districts: ["Kennedy Town", "Sai Ying Pun", "Sheung Wan", "Central", "Admiralty", "Mid-Levels"] },
+    { id: "east", name: "Island East", districts: ["Wan Chai", "Happy Valley", "Causeway Bay", "Tin Hau", "Fortress Hill", "North Point", "Quarry Bay", "Taikoo", "Sai Wan Ho", "Shau Kei Wan", "Heng Fa Chuen", "Chai Wan"] },
+    { id: "south", name: "South side", districts: ["Repulse Bay", "Stanley", "Aberdeen", "Wong Chuk Hang", "Pok Fu Lam"] },
+    { id: "kowloon", name: "Kowloon", districts: TW_LINE.concat(["Hung Hom", "Ho Man Tin", "Kowloon City", "To Kwa Wan", "Kowloon Tong", "Kai Tak", "Kwun Tong", "Tai Kok Tsui"]) }
+  ];
+  var MAX_STOPS = 5;
 
   var TAGS = { "work-friendly": "💻 Work-friendly", "takeaway-only": "🥡 Takeaway only", "small-space": "🤏 Small space", "cheap": "💸 Great value", "pricey": "💎 Pricey", "cash-only": "💵 Cash/Octopus", "closed": "🚫 Closed", "cozy": "🛋️ Cozy", "cute": "🌸 Cute", "no-ports": "🔌 No ports", "time-limit": "⏱️ Time limit", "small-portion": "🥄 Small portion" };
   var TASTE = { milky: "🥛 Milky", strong: "💪 Strong", smooth: "🫧 Smooth", weak: "💧 Weak", nutty: "🌰 Nutty", chocolatey: "🍫 Chocolatey", fruity: "🍓 Fruity", roasty: "🔥 Roasty" };
@@ -67,7 +75,7 @@
   var S = {
     profile: load("bt-profile", null), myVotes: load("bt-votes", {}), myUps: load("bt-ups", {}), commented: {},
     step: 0, draft: {}, brewing: false, pin: null, view: "map", query: "", mine: false,
-    drink: "Espresso Tonic", crawlD: null, crawl: null, tagline: 0,
+    drink: "Espresso Tonic", crawlRegion: null, crawl: null, crawlCustom: null, tagline: 0, saved: load("bt-saved", []),
     fb: { type: "cafe", sent: false, error: "", busy: false, district: "" }
   };
   var app = document.getElementById("app"), navEl = document.getElementById("nav"), topbar = document.getElementById("topbar");
@@ -104,6 +112,11 @@
     return "Other";
   }
 
+  function parseCoords(v) {
+    var m = /(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/.exec(v || "");
+    return m ? [parseFloat(m[1]), parseFloat(m[2])] : null;
+  }
+
   function splitList(v) { return (v || "").toLowerCase().split(/[;,]/).map(function (t) { return t.trim(); }).filter(Boolean); }
 
   function toCafes(rows) {
@@ -118,7 +131,8 @@
       return {
         id: i, district: o.district, name: o.name, rank: isNaN(rank) ? null : rank, rating: isNaN(rating) ? null : rating,
         order: order, drink: drink, price: o.price || "", note: o.note || o.review || "",
-        taste: splitList(o.taste), tags: tags, closed: tags.indexOf("closed") !== -1, maps: o.mapslink || ""
+        taste: splitList(o.taste), tags: tags, closed: tags.indexOf("closed") !== -1, maps: o.mapslink || "",
+        coords: parseCoords(o.latlng || o.coordinates || ((o.lat || o.latitude) && (o.lng || o.lon || o.longitude) ? (o.lat || o.latitude) + "," + (o.lng || o.lon || o.longitude) : ""))
       };
     }).filter(function (c) { return c.district && c.name; });
   }
@@ -168,6 +182,31 @@
   function inD(d) { return cafes.filter(function (c) { return c.district === d; }); }
   function picks(d) { return inD(d).filter(function (c) { return c.rank && !c.closed; }).sort(function (a, b) { return a.rank - b.rank; }).slice(0, 3); }
   function vkey(c) { return c.district + "|" + c.name; }
+  function isSaved(c) { return S.saved.indexOf(vkey(c)) !== -1; }
+  function saveBtn(c) {
+    var on = isSaved(c);
+    return '<button class="pill save" data-save="' + esc(vkey(c)) + '" aria-pressed="' + on + '">' + (on ? "♥ Saved" : "♡ Save") + "</button>";
+  }
+  function savedCafes() {
+    return S.saved.map(function (k) { return cafes.filter(function (c) { return vkey(c) === k; })[0]; }).filter(Boolean);
+  }
+  var PCODE = { milk: { s: "strong", b: "balanced", m: "milky" }, beans: { n: "nutty", f: "fruity", a: "any" }, budget: { s: "save", t: "treat" } };
+  function listLink(list, profile) {
+    var p = profile ? profile.milk[0] + profile.beans[0] + DRINKS.indexOf(profile.drink) + (profile.budget === "save" ? "s" : "t") : "";
+    var items = list.map(function (c) { return slug(c.district) + "~" + slug(c.name); }).join(".");
+    return location.href.split("#")[0] + "#saved/" + p + "_" + items;
+  }
+  function parseListLink(data) {
+    var parts = data.split("_"), p = parts[0], profile = null;
+    if (p.length === 4 && PCODE.milk[p[0]] && PCODE.beans[p[1]] && DRINKS[+p[2]] && PCODE.budget[p[3]]) {
+      profile = { milk: PCODE.milk[p[0]], beans: PCODE.beans[p[1]], drink: DRINKS[+p[2]], budget: PCODE.budget[p[3]] };
+    }
+    var list = (parts.slice(1).join("_") || "").split(".").map(function (it) {
+      var x = it.split("~");
+      return cafes.filter(function (c) { return slug(c.district) === x[0] && slug(c.name) === x[1]; })[0];
+    }).filter(Boolean);
+    return { profile: profile, list: list };
+  }
   function cafeHref(c) { return "#c/" + slug(c.district) + "/" + slug(c.name); }
   function timeAgo(t) {
     var m = Math.max(0, Math.round((Date.now() - t) / 60000));
@@ -299,7 +338,7 @@
       (c.order ? '<p class="order">Get: <b>' + esc(c.order) + "</b>" + (price(c) ? ' <span class="meta">· ' + esc(price(c)) + "</span>" : "") + "</p>" : "") +
       (c.note ? '<p class="note">“' + esc(c.note) + "”</p>" : "") +
       (m && m.why.length ? '<div class="chips">' + m.why.map(function (w) { return '<span class="chip ' + w[0] + '">' + esc(w[1]) + "</span>"; }).join("") + "</div>" : (c.taste.length || c.tags.length ? '<div class="chips">' + chipsFor(c) + "</div>" : "")) +
-      '<div class="row-btns"><a class="pill solid" href="' + esc(mapsUrl(c)) + '" target="_blank" rel="noopener">📍 Open in Maps</a><a class="pill" href="' + cafeHref(c) + '">View café →</a></div>' +
+      '<div class="row-btns"><a class="pill solid" href="' + esc(mapsUrl(c)) + '" target="_blank" rel="noopener">📍 Open in Maps</a>' + saveBtn(c) + '<a class="pill" href="' + cafeHref(c) + '">View café →</a></div>' +
       (opts.noVote ? "" : voteBlock(c)) + "</article>";
   }
 
@@ -496,10 +535,38 @@
         : !S.profile ? '<a class="banner" href="#match"><span class="ico" aria-hidden="true">✨</span><span><b>Is this one for you?</b><small>Take the 20-second Taste Match to see your % match</small></span></a>' : "") +
       '<div class="row-btns"><a class="pill solid" href="' + esc(mapsUrl(c)) + '" target="_blank" rel="noopener">📍 Open in Maps</a>' +
       (c.closed ? "" : '<button class="pill" data-crawlfrom="' + c.id + '">🚶 Start a crawl here</button>') +
-      '<button class="pill" data-share="1">Share</button></div>' +
+      saveBtn(c) + '<button class="pill" data-share="1">Share</button></div>' +
       (c.closed ? "" : voteBlock(c, true));
     if (others.length) html += '<span class="label">More in ' + esc(c.district) + "</span>" + restList(others.slice(0, 6));
     if (sameDrink.length) html += '<span class="label">Other ' + esc(c.drink.toLowerCase()) + "s Putri rates</span>" + restList(sameDrink);
+    return html + "</div>";
+  }
+
+  function viewSaved(data) {
+    var html = '<div class="pad">';
+    if (data) {
+      var shared = parseListLink(data);
+      var newOnes = shared.list.filter(function (c) { return !isSaved(c); });
+      html += '<a class="back" href="#saved">← My list</a><div><h1 class="app-title">A saved list</h1><p class="sub">' + plural(shared.list.length, "café") + " from a Bean There list" + (shared.profile ? " · " + esc(persona(shared.profile).name) : "") + ".</p></div>" +
+        (shared.list.length ? restList(shared.list) : '<p class="sub">This link is empty or out of date.</p>') +
+        (newOnes.length || (shared.profile && !S.profile) ? '<button class="pill solid" data-import="' + esc(data) + '" style="justify-self:start;padding:9px 16px">♥ Add ' + (newOnes.length ? plural(newOnes.length, "café") : "this") + " to my list</button>" : '<p class="sub">You already have all of these saved.</p>');
+      return html + "</div>";
+    }
+    var list = savedCafes();
+    html += '<div><h1 class="app-title">My list</h1><p class="sub">Your saved cafés and quiz result. No login needed.</p></div>';
+    if (S.profile) html += '<a class="banner" href="#results"><span class="ico" aria-hidden="true">' + persona(S.profile).emoji + "</span><span><b>" + esc(persona(S.profile).name) + "</b><small>Your coffee personality · see your matches</small></span></a>";
+    else html += '<a class="banner" href="#match"><span class="ico" aria-hidden="true">✨</span><span><b>Take the Taste Match</b><small>Your result is saved here too</small></span></a>';
+    if (!list.length) {
+      html += '<div class="soon">Nothing saved yet. Tap <b>♡ Save</b> on any café and it will wait for you here.</div><a class="pill solid" href="#map" style="justify-self:start">Browse the map →</a>';
+    } else {
+      html += '<span class="label">Saved cafés (' + list.length + ")</span>" +
+        '<ul class="list">' + list.map(function (c) {
+          return '<li class="' + (c.closed ? "is-closed" : "") + '"><a class="row" href="' + cafeHref(c) + '"><span class="n">♥</span><div><b>' + esc(c.name) + (c.closed ? " (closed)" : "") + "</b><small>" + esc(c.district) + " · " + esc(c.order) + '</small></div></a><button class="icon-btn" data-save="' + esc(vkey(c)) + '" aria-label="Remove ' + esc(c.name) + ' from my list">✕</button></li>';
+        }).join("") + "</ul>" +
+        '<div class="row-btns">' + (list.filter(function (c) { return !c.closed; }).length >= 2 ? '<button class="pill solid" data-crawlsaved="1">🚶 Plan a crawl with these</button>' : "") +
+        '<button class="pill" data-copylist="1">🔗 Copy my list link</button></div>';
+    }
+    html += '<p class="sub" style="font-size:12.5px">Your list is kept on this phone, in this browser. To keep a backup, open it on another device, or share it with a friend, use “Copy my list link”. Clearing your browser data removes the list on this phone.</p>';
     return html + "</div>";
   }
 
@@ -554,31 +621,121 @@
       '<a class="banner" href="#note" data-fbgo="hi"><span class="ico" aria-hidden="true">💌</span><span><b>Send Putri a note</b><small>Suggest a café, share an idea, report a bug or just say hi</small></span></a></div>';
   }
 
+  function regionOf(d) {
+    for (var i = 0; i < REGIONS.length; i++) if (REGIONS[i].districts.indexOf(d) !== -1) return REGIONS[i].id;
+    return "elsewhere";
+  }
+  function crawlRegions() {
+    var list = REGIONS.filter(function (r) { return r.districts.some(function (d) { return districts.indexOf(d) !== -1; }); });
+    if (districts.some(function (d) { return regionOf(d) === "elsewhere"; })) list.push({ id: "elsewhere", name: "Elsewhere", districts: districts.filter(function (d) { return regionOf(d) === "elsewhere"; }) });
+    if (savedCafes().filter(function (c) { return !c.closed; }).length) list.push({ id: "saved", name: "♥ My list", districts: [] });
+    return list;
+  }
+  function walkIndex(d) {
+    for (var i = 0; i < REGIONS.length; i++) { var j = REGIONS[i].districts.indexOf(d); if (j !== -1) return i * 100 + j; }
+    return 1000 + districts.indexOf(d);
+  }
+  function km(a, b) {
+    var x = (b.coords[1] - a.coords[1]) * Math.cos((a.coords[0] + b.coords[0]) * Math.PI / 360), y = b.coords[0] - a.coords[0];
+    return Math.sqrt(x * x + y * y) * 111.2;
+  }
+  // Suggested order: along the MTR / waterfront, then by Putri's rank. With coordinates, nearest stop next.
+  function suggestedOrder(list) {
+    var sorted = list.slice().sort(function (a, b) { return walkIndex(a.district) - walkIndex(b.district) || (a.rank || 9) - (b.rank || 9) || (b.rating || 0) - (a.rating || 0); });
+    if (list.length < 3 || !list.every(function (c) { return c.coords; })) return sorted;
+    var best = null;
+    sorted.forEach(function (startC) { // try each start, keep the shortest nearest-neighbour path
+      var rest = sorted.filter(function (c) { return c !== startC; }), path = [startC], dist = 0;
+      while (rest.length) {
+        var last = path[path.length - 1];
+        rest.sort(function (a, b) { return km(last, a) - km(last, b); });
+        dist += km(last, rest[0]); path.push(rest.shift());
+      }
+      if (!best || dist < best.dist) best = { path: path, dist: dist };
+    });
+    return best.path;
+  }
+  function crawlCandidates(region) {
+    if (region === "saved") return savedCafes().filter(function (c) { return !c.closed; });
+    var reg = crawlRegions().filter(function (r) { return r.id === region; })[0];
+    var ds = reg ? reg.districts.filter(function (d) { return districts.indexOf(d) !== -1; }) : [];
+    return open.filter(function (c) { return ds.indexOf(c.district) !== -1; });
+  }
+  function defaultStops(region) {
+    var cand = crawlCandidates(region);
+    if (region === "saved") return cand.slice(0, MAX_STOPS).map(function (c) { return c.id; });
+    var byD = [];
+    cand.slice().sort(function (a, b) { return walkIndex(a.district) - walkIndex(b.district) || (a.rank || 9) - (b.rank || 9) || (b.rating || 0) - (a.rating || 0); })
+      .forEach(function (c) { if (byD.every(function (x) { return x.district !== c.district; })) byD.push(c); });
+    var pick = byD.slice(0, 3);
+    if (pick.length < 3) cand.forEach(function (c) { if (pick.length < 3 && pick.indexOf(c) === -1 && c.rank) pick.push(c); });
+    return pick.map(function (c) { return c.id; });
+  }
+  function dirUrl(stops, mode) {
+    var pts = stops.map(mapsQ);
+    return "https://www.google.com/maps/dir/?api=1&travelmode=" + mode + "&origin=" + encodeURIComponent(pts[0]) + "&destination=" + encodeURIComponent(pts[pts.length - 1]) +
+      (pts.length > 2 ? "&waypoints=" + encodeURIComponent(pts.slice(1, -1).join("|")) : "");
+  }
+
   function viewCrawl() {
-    if (!S.crawlD || districts.indexOf(S.crawlD) === -1) S.crawlD = S.pin || (districts.indexOf("Sheung Wan") !== -1 ? "Sheung Wan" : districts[0]);
-    var d = S.crawlD, cand = inD(d).filter(function (c) { return !c.closed; }).sort(function (a, b) { return (a.rank || 9) - (b.rank || 9) || (b.rating || 0) - (a.rating || 0); });
-    if (!S.crawl) S.crawl = cand.slice(0, Math.min(3, cand.length)).map(function (c) { return c.id; });
+    var regions = crawlRegions();
+    if (!regions.some(function (r) { return r.id === S.crawlRegion; })) { S.crawlRegion = S.pin ? regionOf(S.pin) : "west"; if (!regions.some(function (r) { return r.id === S.crawlRegion; })) S.crawlRegion = regions[0].id; S.crawl = null; }
+    var region = S.crawlRegion, cand = crawlCandidates(region);
+    if (!S.crawl) { S.crawl = defaultStops(region); S.crawlCustom = null; }
     var sel = cand.filter(function (c) { return S.crawl.indexOf(c.id) !== -1; });
-    var mg = sel.reduce(function (s, c) { return s + (CAFFEINE[c.drink] || 110); }, 0);
-    var spend = sel.reduce(function (s, c) { return s + firstPrice(c); }, 0);
+    var stops = S.crawlCustom ? S.crawlCustom.map(function (id) { return sel.filter(function (c) { return c.id === id; })[0]; }).filter(Boolean) : suggestedOrder(sel);
+    var mg = stops.reduce(function (t, c) { return t + (CAFFEINE[c.drink] || 110); }, 0);
+    var spend = stops.reduce(function (t, c) { return t + firstPrice(c); }, 0);
     var mood = mg === 0 ? "Pick some stops!" : mg <= 150 ? "A gentle buzz. Very civilised." : mg <= 280 ? "Productive vibrations. Emails will be answered." : mg <= 400 ? "You can now hear colours." : "Putri is legally required to stop you. Make one a matcha?";
-    var url = "";
-    if (sel.length >= 2) {
-      var pts = sel.map(mapsQ);
-      url = "https://www.google.com/maps/dir/?api=1&travelmode=walking&origin=" + encodeURIComponent(pts[0]) + "&destination=" + encodeURIComponent(pts[pts.length - 1]) + (pts.length > 2 ? "&waypoints=" + encodeURIComponent(pts.slice(1, -1).join("|")) : "");
-    }
-    return '<div class="pad"><h1 class="app-title">Coffee Crawl</h1><p class="sub">Pick a district and 2–4 stops. Putri plans the walk.</p>' +
-      '<label class="label" for="crawlD">District</label><select class="select" id="crawlD">' + districts.map(function (x) { return "<option" + (x === d ? " selected" : "") + ">" + esc(x) + "</option>"; }).join("") + "</select>" +
-      (cand.length ? '<div class="list" role="group" aria-label="Stops">' + cand.map(function (c) {
-        var on = S.crawl.indexOf(c.id) !== -1, full = !on && S.crawl.length >= 4;
+    var oneDistrict = stops.every(function (c) { return c.district === (stops[0] || {}).district; });
+
+    var html = '<div class="pad"><h1 class="app-title">Coffee Crawl</h1><p class="sub">Pick an area and up to ' + MAX_STOPS + " stops. Putri suggests the order; rearrange it if you like.</p>" +
+      '<div class="chips" role="group" aria-label="Area">' + regions.map(function (r) {
+        return '<button class="pill" data-region="' + r.id + '" aria-pressed="' + (r.id === region) + '">' + esc(r.name) + "</button>";
+      }).join("") + "</div>";
+
+    // Candidate stops grouped by district, in walking order
+    var groups = [];
+    cand.slice().sort(function (a, b) { return walkIndex(a.district) - walkIndex(b.district) || (a.rank || 9) - (b.rank || 9) || (b.rating || 0) - (a.rating || 0); })
+      .forEach(function (c) { var g = groups[groups.length - 1]; if (!g || g.d !== c.district) groups.push(g = { d: c.district, list: [] }); g.list.push(c); });
+    var picker = groups.length ? '<span class="label">Add or change stops</span>' + groups.map(function (g) {
+      var n = g.list.filter(function (c) { return S.crawl.indexOf(c.id) !== -1; }).length;
+      return '<details class="stops-group"' + (groups.length === 1 || !stops.length ? " open" : "") + '><summary>' + esc(g.d) + ' <span class="meta">' + (n ? n + " picked · " : "") + plural(g.list.length, "café") + '</span></summary><div class="list" role="group" aria-label="' + esc(g.d) + '">' + g.list.map(function (c) {
+        var on = S.crawl.indexOf(c.id) !== -1, full = !on && S.crawl.length >= MAX_STOPS;
         return '<label class="stop"><input type="checkbox" data-stop="' + c.id + '"' + (on ? " checked" : "") + (full ? " disabled" : "") + '><span><b style="font-size:14px">' + esc(c.name) + '</b><br><small class="meta">' + esc(c.drink) + (price(c) ? " · " + esc(price(c)) : "") + '</small></span><span class="score">' + (c.rank ? "#" + c.rank : c.rating != null ? "★ " + c.rating : "") + "</span></label>";
-      }).join("") + "</div>" : '<p class="sub">No open cafés here yet.</p>') +
-      '<div class="meter"><div class="h-row"><b>☕ ' + mg + ' mg caffeine</b><small class="meta">daily limit ~400 mg</small></div>' +
-      '<div class="meter-bar' + (mg > 400 ? " over" : "") + '" role="img" aria-label="' + mg + ' of 400 milligrams"><i style="width:' + Math.min(100, mg / 400 * 100) + '%"></i></div><small>' + esc(mood) + "</small></div>" +
-      (sel.length ? '<span class="label">Your route · about HK$' + spend + '</span><div class="route">' + sel.map(function (c, i) {
-        return "<div><span>" + (i + 1) + '</span><p style="margin:0"><b><a class="cafe-link" href="' + cafeHref(c) + '">' + esc(c.name) + '</a></b><br><small class="meta">Get: ' + esc(c.order) + "</small></p></div>";
-      }).join("") + "</div>" : "") +
-      (url ? '<a class="pill solid" style="text-align:center;padding:10px" href="' + esc(url) + '" target="_blank" rel="noopener">🚶 Open walking route in Google Maps</a>' : '<p class="sub">Pick at least 2 stops to get a route.</p>') + "</div>";
+      }).join("") + "</div></details>";
+    }).join("") : '<p class="sub">No open cafés here yet.</p>';
+
+    var meter = '<div class="meter"><div class="h-row"><b>☕ ' + mg + ' mg caffeine</b><small class="meta">daily limit ~400 mg</small></div>' +
+      '<div class="meter-bar' + (mg > 400 ? " over" : "") + '" role="img" aria-label="' + mg + ' of 400 milligrams"><i style="width:' + Math.min(100, mg / 400 * 100) + '%"></i></div><small>' + esc(mood) + "</small></div>";
+
+    if (stops.length) {
+      var allCoords = stops.every(function (c) { return c.coords; });
+      html += '<div class="h-row"><span class="label" style="margin:0">' + (S.crawlCustom ? "Your order" : "Suggested order") + " · about HK$" + spend + "</span>" +
+        (S.crawlCustom ? '<button class="pill" data-resetorder="1">Use suggested order</button>' : "") + "</div>" +
+        '<ol class="route-edit">' + stops.map(function (c, i) {
+          var leg = "";
+          if (i > 0) {
+            var prev = stops[i - 1], same = prev.district === c.district;
+            leg = '<a class="leg" href="' + esc(dirUrl([prev, c], same ? "walking" : "transit")) + '" target="_blank" rel="noopener">' + (same ? "🚶 Walk from stop " + i : "🚇 MTR or walk from stop " + i) + allCoordsLeg(prev, c) + " →</a>";
+          }
+          return "<li>" + leg + '<div class="route-row"><span class="num">' + (i + 1) + '</span><span class="who"><a class="cafe-link" href="' + cafeHref(c) + '"><b>' + esc(c.name) + '</b></a><small class="meta">' + esc(c.district) + " · get " + esc(c.order) + "</small></span>" +
+            '<span class="moves"><button class="icon-btn" data-move="' + c.id + '" data-dir="-1" aria-label="Move ' + esc(c.name) + ' earlier"' + (i === 0 ? " disabled" : "") + ">↑</button>" +
+            '<button class="icon-btn" data-move="' + c.id + '" data-dir="1" aria-label="Move ' + esc(c.name) + ' later"' + (i === stops.length - 1 ? " disabled" : "") + ">↓</button>" +
+            '<button class="icon-btn" data-unstop="' + c.id + '" aria-label="Remove ' + esc(c.name) + '">✕</button></span></div></li>';
+        }).join("") + "</ol>";
+      if (!allCoords && stops.length > 2 && !oneDistrict && !S.crawlCustom) html += '<p class="sub" style="font-size:12.5px">Ordered along the MTR line, one district after the next.</p>';
+      if (stops.length >= 2) {
+        html += '<a class="pill solid" style="text-align:center;padding:10px" href="' + esc(dirUrl(stops, "walking")) + '" target="_blank" rel="noopener">🗺️ Open the whole route in Google Maps</a>' +
+          (oneDistrict ? "" : '<p class="sub" style="font-size:12.5px">The whole route opens as a walk. Google Maps can’t add stops to MTR directions, so use the 🚇 links between stops when it’s too far to walk.</p>');
+      } else html += '<p class="sub">Pick at least 2 stops to get a route.</p>';
+    } else html += '<p class="sub">Pick some stops below to build your route.</p>';
+    return html + meter + picker + "</div>";
+  }
+  function allCoordsLeg(a, b) {
+    if (!a.coords || !b.coords) return "";
+    var d = km(a, b);
+    return " · " + (d < 1 ? Math.round(d * 1000 / 10) * 10 + " m" : d.toFixed(1) + " km");
   }
 
   function viewVotes() {
@@ -655,14 +812,15 @@
       var cafe = cd && cafes.filter(function (x) { return x.district === cd && slug(x.name) === parts[1]; })[0];
       return cafe ? { name: "cafe", c: cafe } : { name: "map" };
     }
-    if (["map", "match", "results", "putri", "crawl", "votes", "note"].indexOf(h) !== -1) return { name: h };
+    if (["map", "match", "results", "putri", "crawl", "votes", "note", "saved"].indexOf(h) !== -1) return { name: h };
+    if (h.indexOf("saved/") === 0) return { name: "saved", data: h.slice(6) };
     var legacy = districtFromSlug(h); // old links like #sheung-wan
     return legacy ? { name: "district", d: legacy } : { name: "landing" };
   }
 
   var lastRoute = "";
   function route(keepScroll) {
-    var r = parseHash(), key = r.name + (r.d || "") + (r.c ? r.c.id : "");
+    var r = parseHash(), key = r.name + (r.d || "") + (r.c ? r.c.id : "") + (r.data || "");
     if (key !== lastRoute) { keepScroll = false; if (r.name === "match" && !S.brewing) { S.step = 0; S.draft = {}; } }
     lastRoute = key;
     if (r.name === "results" && !S.profile) { location.replace("#match"); return; }
@@ -676,6 +834,7 @@
     else if (r.name === "putri") { html = viewPutri(); title = "Putri’s Palate · " + title; }
     else if (r.name === "crawl") { html = viewCrawl(); title = "Coffee Crawl · " + title; }
     else if (r.name === "votes") { html = viewVotes(); title = "Putri vs You · " + title; }
+    else if (r.name === "saved") { html = viewSaved(r.data); title = "My list · " + title; navKey = ""; }
     else if (r.name === "note") { html = viewNote(); title = "Send Putri a note · " + title; navKey = "putri"; }
     document.title = title;
     app.innerHTML = html;
@@ -688,10 +847,17 @@
     navEl.innerHTML = NAV.map(function (n) {
       return '<a href="#' + n[0] + '"' + (navKey === n[0] || (n[0] === "results" && navKey === "match") ? ' aria-current="page"' : "") + '><span aria-hidden="true">' + n[1] + "</span>" + n[2] + "</a>";
     }).join("");
+    var sc = document.getElementById("saved-count");
+    if (sc) { sc.textContent = S.saved.length ? S.saved.length : ""; sc.parentNode.setAttribute("aria-current", r.name === "saved" ? "page" : "false"); }
     window.scrollTo(0, keepScroll ? y : 0);
   }
 
   // ---------- Events ----------
+
+  function currentOrder() {
+    var sel = crawlCandidates(S.crawlRegion).filter(function (c) { return S.crawl.indexOf(c.id) !== -1; });
+    return S.crawlCustom ? S.crawlCustom.filter(function (id) { return sel.some(function (c) { return c.id === id; }); }) : suggestedOrder(sel).map(function (c) { return c.id; });
+  }
 
   function clearTimers() { timers.forEach(clearTimeout); timers = []; }
 
@@ -744,13 +910,41 @@
     if (d.crawlfrom) {
       var cf = cafes.filter(function (x) { return x.id === +d.crawlfrom; })[0];
       if (cf) {
-        S.crawlD = cf.district;
-        var rest = inD(cf.district).filter(function (x) { return !x.closed && x !== cf; }).sort(function (a, b) { return (a.rank || 9) - (b.rank || 9) || (b.rating || 0) - (a.rating || 0); });
-        S.crawl = [cf.id].concat(rest.slice(0, 2).map(function (x) { return x.id; }));
+        S.crawlRegion = regionOf(cf.district);
+        var near = inD(cf.district).filter(function (x) { return !x.closed && x !== cf; }).sort(function (a, b) { return (a.rank || 9) - (b.rank || 9) || (b.rating || 0) - (a.rating || 0); });
+        S.crawl = [cf.id].concat(near.slice(0, 2).map(function (x) { return x.id; })); S.crawlCustom = null;
         location.hash = "#crawl";
       }
       return;
     }
+    if (d.region) { S.crawlRegion = d.region; S.crawl = null; S.crawlCustom = null; route(true); return; }
+    if (d.resetorder) { S.crawlCustom = null; route(true); return; }
+    if (d.move || d.unstop) {
+      var order = currentOrder(), id2 = +(d.move || d.unstop), at = order.indexOf(id2);
+      if (d.unstop) { order.splice(at, 1); S.crawl = S.crawl.filter(function (x) { return x !== id2; }); }
+      else { var to = at + (+d.dir); if (to < 0 || to >= order.length) return; order.splice(at, 1); order.splice(to, 0, id2); }
+      S.crawlCustom = order; route(true); return;
+    }
+    if (d.save) {
+      var sk = d.save, si = S.saved.indexOf(sk);
+      if (si === -1) { S.saved.push(sk); toast("Saved to My list ♥"); } else { S.saved.splice(si, 1); toast("Removed from My list"); }
+      save("bt-saved", S.saved); route(true); return;
+    }
+    if (d.copylist) {
+      var url = listLink(savedCafes(), S.profile);
+      if (navigator.share) navigator.share({ title: "My Bean There list", url: url }).catch(function () {});
+      else if (navigator.clipboard) navigator.clipboard.writeText(url).then(function () { toast("Link copied! Open it anywhere to get your list back."); }, function () { toast(url); });
+      else toast(url);
+      return;
+    }
+    if (d.import) {
+      var imp = parseListLink(d.import);
+      imp.list.forEach(function (c) { if (!isSaved(c)) S.saved.push(vkey(c)); });
+      save("bt-saved", S.saved);
+      if (imp.profile && !S.profile) { S.profile = imp.profile; save("bt-profile", S.profile); }
+      toast("Added to My list ♥"); location.hash = "#saved"; return;
+    }
+    if (d.crawlsaved) { S.crawlRegion = "saved"; S.crawl = null; S.crawlCustom = null; location.hash = "#crawl"; return; }
     if (d.fbtype) { S.fb.type = d.fbtype; S.fb.error = ""; route(true); return; }
     if (d.fbnew) { S.fb.sent = false; route(true); return; }
     if (d.up) {
@@ -783,10 +977,10 @@
   });
 
   document.addEventListener("change", function (e) {
-    if (e.target.id === "crawlD") { S.crawlD = e.target.value; S.crawl = null; route(true); }
     if (e.target.dataset && e.target.dataset.stop) {
       var id = +e.target.dataset.stop, i = S.crawl.indexOf(id);
-      if (e.target.checked && i === -1) S.crawl.push(id); else if (!e.target.checked && i !== -1) S.crawl.splice(i, 1);
+      if (e.target.checked && i === -1 && S.crawl.length < MAX_STOPS) { S.crawl.push(id); if (S.crawlCustom) S.crawlCustom.push(id); }
+      else if (!e.target.checked && i !== -1) { S.crawl.splice(i, 1); if (S.crawlCustom) S.crawlCustom = S.crawlCustom.filter(function (x) { return x !== id; }); }
       route(true);
     }
   });
@@ -847,6 +1041,10 @@
   // ---------- Start ----------
 
   document.querySelector(".brand-cup").outerHTML = mascot("brand-cup");
+  var savedLink = document.createElement("a");
+  savedLink.className = "saved-link"; savedLink.href = "#saved"; savedLink.setAttribute("aria-label", "My list");
+  savedLink.innerHTML = '<span aria-hidden="true">♥</span><span id="saved-count"></span>';
+  document.getElementById("share-btn").before(savedLink);
 
   loadCafes().then(function (list) {
     cafes = list;
