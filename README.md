@@ -86,6 +86,11 @@ If you change `Code.gs` later: **Deploy → Manage deployments → ✏️ → Ve
 ### 3. GitHub Pages (done)
 Settings → Pages → Deploy from branch `main` / `(root)`. Live at https://amabelnapitu.github.io/bean-there-by-putri/
 
+## Offline, returning visitors and link previews
+- `sw.js` keeps the app and the latest café list on the phone, so it opens without signal (votes and notes still need a connection). It always tries the network first, so updates show up straight away when online.
+- Returning visitors skip the landing page and open on the map. Tapping the logo still shows it.
+- `og-image.jpg` is the preview card WhatsApp, iMessage and Instagram show for any link to the site. The Share button adds a line naming the café or page being shared.
+
 ## Links you can share
 - Home: `…/bean-there-by-putri/`
 - Straight to the quiz: `…/#match`

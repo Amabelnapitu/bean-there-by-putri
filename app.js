@@ -1021,12 +1021,34 @@
     clearTimeout(toastTimer); toastTimer = setTimeout(function () { el.hidden = true; }, 2600);
   }
 
+  // The message that goes with a shared link, so WhatsApp shows which café or page it is.
+  function shareText() {
+    var r = parseHash();
+    if (r.name === "cafe") {
+      var c = r.c;
+      return "☕ " + c.name + " (" + c.district + ")" + (c.rating != null ? ": Putri gives it ★ " + c.rating : "") +
+        (c.order ? ". Get the " + c.order.toLowerCase() : "") + ". On Bean There by Putri:";
+    }
+    if (r.name === "district") return "☕ Putri’s top cafés in " + r.d + ", on Bean There:";
+    if (r.name === "results" && S.profile) return "I’m " + persona(S.profile).name + " ☕ Find your coffee personality on Bean There:";
+    if (r.name === "crawl") return "🚶 Coffee crawl idea from Bean There by Putri:";
+    if (r.name === "match") return "☕ Take Putri’s 20-second Taste Match:";
+    return "☕ Putri’s honest café picks across Hong Kong:";
+  }
+
   document.getElementById("share-btn").addEventListener("click", function () {
-    var data = { title: document.title, url: location.href };
-    if (navigator.share) navigator.share(data).catch(function () {});
-    else if (navigator.clipboard) navigator.clipboard.writeText(location.href).then(function () { toast("Link copied!"); }, function () { toast(location.href); });
-    else toast(location.href);
+    var text = shareText(), url = location.href;
+    if (navigator.share) navigator.share({ title: document.title, text: text, url: url }).catch(function () {});
+    else if (navigator.clipboard) navigator.clipboard.writeText(text + " " + url).then(function () { toast("Link copied!"); }, function () { toast(url); });
+    else toast(url);
   });
+
+  // Works offline: the service worker keeps the app and the latest café list on the phone.
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+    window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () { /* offline mode is a bonus */ }); });
+  }
+  window.addEventListener("offline", function () { toast("You’re offline. Showing the café list saved on this phone."); });
+  window.addEventListener("online", function () { toast("Back online ☕"); refreshSummary(); });
 
   window.addEventListener("hashchange", function () { clearTimers(); S.brewing = false; route(); });
 
@@ -1052,8 +1074,13 @@
     districts = [];
     ISLAND_LINE.concat(TW_LINE).forEach(function (d) { if (!seen[d] && cafes.some(function (c) { return c.district === d; })) { seen[d] = 1; districts.push(d); } });
     cafes.forEach(function (c) { if (!seen[c.district]) { seen[c.district] = 1; districts.push(c.district); } });
+    // Returning visitors skip the landing page and open on the map.
+    var returning = load("bt-visited", false);
+    save("bt-visited", true);
+    if (returning && !location.hash) history.replaceState(null, "", "#map");
     route();
     refreshSummary();
+    if (!navigator.onLine) toast("You’re offline. Showing the café list saved on this phone.");
   }).catch(function (err) {
     console.error(err);
     app.innerHTML = '<p class="status">Couldn’t load the café list. Please try again in a bit.</p>';
