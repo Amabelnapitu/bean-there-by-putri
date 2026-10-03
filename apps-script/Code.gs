@@ -49,6 +49,64 @@ function doPost(e) {
   }
 }
 
+// ---------- Sheet menu: fill in café locations ----------
+
+// Adds a "Bean There" menu to the sheet.
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('Bean There')
+    .addItem('Fill in café locations (Lat, Lng)', 'fillCoordinates')
+    .addToUi();
+}
+
+// Looks up every café in the APP tab that has no Lat, Lng yet and writes "lat, lng".
+// Matches that don't look like a café (or fall outside Hong Kong) get a yellow cell and a note to check.
+function fillCoordinates() {
+  var ui = SpreadsheetApp.getUi();
+  var sh = SpreadsheetApp.getActive().getSheetByName('APP');
+  if (!sh) { ui.alert('No APP tab found.'); return; }
+  var values = sh.getDataRange().getValues();
+  var head = values[0].map(function (h) { return String(h).toLowerCase().replace(/[^a-z]/g, ''); });
+  var d = head.indexOf('district'), n = head.indexOf('name'), col = head.indexOf('latlng');
+  if (d === -1 || n === -1) { ui.alert('The APP tab needs District and Name columns.'); return; }
+  if (col === -1) {
+    col = values[0].length;
+    sh.getRange(1, col + 1).setValue('Lat, Lng').setFontWeight('bold');
+  }
+
+  var geocoder = Maps.newGeocoder().setRegion('hk').setLanguage('en');
+  var filled = 0, check = [], missing = [];
+  for (var i = 1; i < values.length; i++) {
+    var name = String(values[i][n]).trim(), district = String(values[i][d]).trim();
+    var existing = col < values[i].length ? String(values[i][col]).trim() : '';
+    if (!name || existing) continue;
+
+    var cell = sh.getRange(i + 1, col + 1);
+    var res = geocoder.geocode(name + ', ' + district + ', Hong Kong');
+    var hit = res && res.status === 'OK' ? res.results[0] : null;
+    if (!hit) { missing.push(name + ' (' + district + ')'); Utilities.sleep(150); continue; }
+
+    var loc = hit.geometry.location;
+    var inHK = loc.lat > 22.15 && loc.lat < 22.57 && loc.lng > 113.82 && loc.lng < 114.45;
+    var isPlace = (hit.types || []).some(function (t) { return ['cafe', 'restaurant', 'food', 'establishment', 'point_of_interest', 'store', 'bakery'].indexOf(t) !== -1; });
+    if (!inHK) { missing.push(name + ' (' + district + ')'); Utilities.sleep(150); continue; }
+
+    cell.setValue(loc.lat.toFixed(5) + ', ' + loc.lng.toFixed(5));
+    if (isPlace) { cell.setBackground(null).clearNote(); }
+    else {
+      cell.setBackground('#FFF4C2').setNote('Please check: matched "' + hit.formatted_address + '". Replace with the café’s own Lat, Lng if wrong.');
+      check.push(name + ' (' + district + ')');
+    }
+    filled++;
+    Utilities.sleep(150);
+  }
+
+  var msg = 'Filled in ' + filled + ' café location' + (filled === 1 ? '' : 's') + '.';
+  if (check.length) msg += '\n\nPlease double-check these (yellow cells):\n• ' + check.join('\n• ');
+  if (missing.length) msg += '\n\nCouldn’t find these, add them by hand:\n• ' + missing.join('\n• ');
+  msg += '\n\nTo fix one: in Google Maps, long-press the café, copy the two numbers and paste them into its Lat, Lng cell.';
+  ui.alert(msg);
+}
+
 // ---------- Actions ----------
 
 function vote_(body, device) {
