@@ -63,19 +63,18 @@ function onOpen() {
 // Also asks Google for permission to send email the first time you run it.
 function sendTestEmail() {
   notify_('Bean There: test email', 'It works! New notes from the site will arrive like this.');
-  SpreadsheetApp.getUi().alert('Test email sent to ' + (NOTIFY_EMAIL || Session.getEffectiveUser().getEmail()) + '.');
+  alert_('Test email sent to ' + (NOTIFY_EMAIL || Session.getEffectiveUser().getEmail()) + '.');
 }
 
 // Looks up every café in the APP tab that has no Lat, Lng yet and writes "lat, lng".
 // Matches that don't look like a café (or fall outside Hong Kong) get a yellow cell and a note to check.
 function fillCoordinates() {
-  var ui = SpreadsheetApp.getUi();
   var sh = SpreadsheetApp.getActive().getSheetByName('APP');
-  if (!sh) { ui.alert('No APP tab found.'); return; }
+  if (!sh) { alert_('No APP tab found.'); return; }
   var values = sh.getDataRange().getValues();
   var head = values[0].map(function (h) { return String(h).toLowerCase().replace(/[^a-z]/g, ''); });
   var d = head.indexOf('district'), n = head.indexOf('name'), col = head.indexOf('latlng');
-  if (d === -1 || n === -1) { ui.alert('The APP tab needs District and Name columns.'); return; }
+  if (d === -1 || n === -1) { alert_('The APP tab needs District and Name columns.'); return; }
   if (col === -1) {
     col = values[0].length;
     sh.getRange(1, col + 1).setValue('Lat, Lng').setFontWeight('bold');
@@ -112,7 +111,13 @@ function fillCoordinates() {
   if (check.length) msg += '\n\nPlease double-check these (yellow cells):\n• ' + check.join('\n• ');
   if (missing.length) msg += '\n\nCouldn’t find these, add them by hand:\n• ' + missing.join('\n• ');
   msg += '\n\nTo fix one: in Google Maps, long-press the café, copy the two numbers and paste them into its Lat, Lng cell.';
-  ui.alert(msg);
+  alert_(msg);
+}
+
+// Shows a pop-up in the sheet, or writes to the Execution log when run from the script editor.
+function alert_(msg) {
+  console.log(msg);
+  try { SpreadsheetApp.getUi().alert(msg); } catch (err) { /* run from the editor: see the Execution log */ }
 }
 
 // ---------- Actions ----------
