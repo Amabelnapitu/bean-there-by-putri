@@ -4,11 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Bean There by Putri</title>
-  <meta name="description" content="Putri's honest coffee picks around Hong Kong, district by district.">
-  <meta name="theme-color" content="#FBF6EF" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#1A1411" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="Putri's honest coffee picks around Hong Kong: find your perfect cup, explore by MTR stop, plan a coffee crawl.">
+  <meta name="theme-color" content="#E0D0F2" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#2A2036" media="(prefers-color-scheme: dark)">
   <meta property="og:title" content="Bean There by Putri">
-  <meta property="og:description" content="Putri's top 3 cafés in every Hong Kong district.">
+  <meta property="og:description" content="I drank all of this so you don't have to. Putri's top cafés in every Hong Kong district.">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon-192.png">
   <link rel="manifest" href="manifest.webmanifest">
@@ -16,29 +16,23 @@
   <meta name="apple-mobile-web-app-title" content="Bean There">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Sriracha&family=Patrick+Hand+SC&family=Shrikhand&family=Bricolage+Grotesque:opsz,wght@12..96,400..700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header class="site-header">
+  <header class="topbar" id="topbar" hidden>
     <a href="#" class="brand" aria-label="Bean There by Putri, home">
-      <span class="brand-mark" aria-hidden="true">☕</span>
-      <span>
-        <span class="brand-name">Bean There</span>
-        <span class="brand-by">by Putri</span>
-      </span>
+      <svg class="brand-cup" viewBox="0 0 140 150" aria-hidden="true"><use href="#cup-mascot"/></svg>
+      <span class="brand-name">Bean There</span>
     </a>
-    <button class="share-btn" id="share-btn" type="button" aria-label="Share this page">Share</button>
+    <button class="share-btn" id="share-btn" type="button">Share</button>
   </header>
 
   <main id="app" aria-live="polite">
     <p class="status">Brewing the list…</p>
   </main>
 
-  <footer class="site-footer">
-    <p>Honest opinions, one cup at a time. Prices in HK$, from my last visit.</p>
-  </footer>
-
+  <nav class="nav" id="nav" aria-label="Main" hidden></nav>
   <div class="toast" id="toast" role="status" hidden></div>
 
   <script src="config.js"></script>

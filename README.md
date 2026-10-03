@@ -1,65 +1,81 @@
-# ☕ Bean There by Putri
+# ☕🌷 Bean There by Putri
 
-Putri's honest coffee picks around Hong Kong: pick a district, see her top 3 cafés.
+Putri's honest coffee picks around Hong Kong.
 
-A single static page (HTML + CSS + JS, no build step, no backend). The café list lives in a
-Google Sheet, so updating the site is just editing the sheet.
+- **Taste Match:** a 4-question quiz, a "Brewing for you" moment, then a coffee personality and a % match on every café.
+- **MTR map:** districts drawn as stations on the Island and Tsuen Wan lines, with search that lights up matching stations.
+- **District pages:** Putri's top 3, or "Best for me" sorted by the visitor's match.
+- **Putri's Palate:** stats, rating habits, hall of fame/shame and power rankings per drink, all calculated from the sheet.
+- **Coffee Crawl:** pick 2–4 stops, get a caffeine meter and a Google Maps walking route.
+- **Putri vs You:** friends vote 👍/👎 on Putri's verdicts.
+- **Send Putri a note:** café suggestions (feeding a to-try list friends can upvote), ideas, bugs, hellos.
 
-## How the data works
+A static site (HTML + CSS + JS, no build step) on GitHub Pages. Café data comes from the
+Google Sheet; votes and notes go through a small Google Apps Script. Everything is free.
 
-The site reads a CSV with one row per café:
+## The café list (APP tab)
+
+One row per café:
 
 | Column | What to put | Example |
 |---|---|---|
 | District | District name | Sheung Wan |
 | Name | Café name | Halfway Coffee |
-| Rank | `1`, `2` or `3` for your top picks in that district. Leave blank for the rest | 1 |
+| Rank | `1`, `2`, `3` for your top picks in that district; blank for the rest | 1 |
 | Rating | Out of 5 | 4.5 |
 | Must Order | What to get | Oat Milk Latte |
-| Price | In HK$ (numbers get "HK$" added automatically) | 45 |
+| Drink | `Espresso Tonic`, `Flat White`, `Latte`, `Matcha`, `Americano` or `Other` (guessed from Must Order if blank) | Latte |
+| Price | In HK$ | 45 |
 | Note | Your one-liner | Super good coffee, cute vibes |
-| Tags | Optional, separated by `;` | work-friendly;small-space |
-| Maps Link | Optional Google Maps link. If blank, the app searches Google Maps by name + district | https://maps.app.goo.gl/… |
+| Taste | `milky`, `strong`, `smooth`, `weak`, `nutty`, `chocolatey`, `fruity`, `roasty` (separate with `;`) | milky;nutty |
+| Tags | `work-friendly`, `cozy`, `cute`, `takeaway-only`, `small-space`, `small-portion`, `no-ports`, `time-limit`, `cheap`, `pricey`, `cash-only`, `closed` | cozy;cheap |
+| Maps Link | Optional Google Maps link (otherwise the app searches by name + district) | https://maps.app.goo.gl/… |
 
-Tags with a nice label: `work-friendly`, `takeaway-only`, `small-space`, `cheap`, `cash-only`,
-`closed` (closed cafés never show as a top pick). Any other tag is shown as-is.
+Taste Match uses Rating, Drink, Taste and the `cheap`/`pricey` tags. Closed cafés never show as a top pick.
 
-A new district appears automatically. Known districts are grouped under Hong Kong Island,
-Kowloon, or New Territories & Islands (see the `AREAS` list in `app.js`); anything else
-shows under "More places".
+New districts appear automatically. Districts on the Island line or Tsuen Wan line become
+stations in the right order (see `ISLAND_LINE` and `TW_LINE` in `app.js`); anything else
+hangs off a bus route from Central.
 
-## One-time setup
+`data/cafes.csv` is a saved copy the site falls back to if the sheet can't be reached.
 
-### 1. Add the App tab to your Google Sheet
-1. Open the **Review** sheet → **File → Import → Upload** → choose `data/cafes.csv` from this repo.
-2. Pick **Insert new sheet(s)**, then rename the new tab to `App`.
-3. Check the ranks, fix anything I got wrong, and add Maps links whenever you like.
+## Setup
 
-### 2. Publish the App tab as CSV
-1. **File → Share → Publish to web**.
-2. In the first dropdown pick the **App** tab (not "Entire document"); in the second pick
-   **Comma-separated values (.csv)**. Click **Publish** and copy the link.
-3. Paste it into `config.js`:
-   ```js
-   window.BEAN_THERE_CONFIG = {
-     sheetCsvUrl: "https://docs.google.com/spreadsheets/d/e/…/pub?gid=…&single=true&output=csv"
-   };
-   ```
-4. Commit. From now on, edits to the App tab show on the site within about 5 minutes.
+### 1. Publish the APP tab (done)
+**File → Share → Publish to web**, choose the **APP** tab and **CSV**. The link is in `config.js` as `sheetCsvUrl`.
 
-Only the App tab becomes public; your other tabs stay private.
-If the sheet can't be reached, the site falls back to `data/cafes.csv`.
+### 2. Votes and notes: deploy the Apps Script
+1. Open the **Review** sheet → **Extensions → Apps Script**.
+2. Delete what's there and paste in everything from `apps-script/Code.gs`. Click **Save**.
+3. Optional: set `NOTIFY_EMAIL` at the top to your email to get a copy of every note.
+4. **Deploy → New deployment** → gear icon → **Web app**.
+   - Execute as: **Me**
+   - Who has access: **Anyone**
+5. Click **Deploy**, then **Authorize access** and allow it. (Google shows a "Google hasn't verified this app" warning because it's your own script: **Advanced → Go to … (unsafe)**.)
+6. Copy the **Web app URL** (ends in `/exec`) and paste it into `config.js` as `apiUrl`.
 
-### 3. Turn on GitHub Pages (free)
-Repo **Settings → Pages → Build and deployment → Source: Deploy from a branch →
-Branch: `main` / `(root)` → Save**. After a minute the site is live at
-`https://<your-github-username>.github.io/bean-there-by-putri/`.
+Until `apiUrl` is set, the votes and note screens say "opening soon"; everything else works.
 
-## Sharing
-- Send a district directly: `…/bean-there-by-putri/#sheung-wan`.
-- The **Share** button opens the phone's share sheet (WhatsApp, etc.).
-- On a phone: **Share → Add to Home Screen** (iPhone) or **⋮ → Add to Home screen** (Android)
-  to get an app icon.
+The script creates these tabs in the sheet on first use:
+
+- **Votes:** Timestamp · Device · District · Café · Verdict · Comment. Only each phone's latest vote per café counts.
+- **Feedback:** Timestamp · Device · Type · Café · District · Message · Name · Status · Putri's Rating · Approved.
+  - Café suggestions only show on the to-try list once you type `yes` in **Approved**.
+  - Set **Status** to `tried` (and optionally fill **Putri's Rating**) to show "Tried ✓".
+- **Upvotes:** Timestamp · Device · Suggestion · Up.
+
+"Device" is a random ID stored on each phone, used to stop double votes. No personal data is collected.
+
+If you change `Code.gs` later: **Deploy → Manage deployments → ✏️ → Version: New version → Deploy** (the URL stays the same).
+
+### 3. GitHub Pages (done)
+Settings → Pages → Deploy from branch `main` / `(root)`. Live at https://amabelnapitu.github.io/bean-there-by-putri/
+
+## Links you can share
+- Home: `…/bean-there-by-putri/`
+- Straight to the quiz: `…/#match`
+- A district: `…/#d/sheung-wan`
+- The map: `…/#map` · Putri's Palate: `…/#putri` · Crawl: `…/#crawl` · Send a note: `…/#note`
 
 ## Run locally
 ```sh
