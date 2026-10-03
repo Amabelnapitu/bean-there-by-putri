@@ -781,8 +781,7 @@
       } else {
         html += '<label class="field">' + (f.type === "idea" ? "Your idea or the bug you found" : "Your message") + '<textarea id="fb-msg" maxlength="600" required placeholder="' + (f.type === "idea" ? "It would be cool if…" : "Hi Putri!") + '"></textarea></label>';
       }
-      html += '<label class="field">Your name <small>optional</small><input id="fb-name" maxlength="40" placeholder="So Putri knows who to thank" autocomplete="given-name"></label>' +
-        '<label class="hp" aria-hidden="true">Leave this empty<input id="fb-hp" tabindex="-1" autocomplete="off"></label>' +
+      html += '<label class="hp" aria-hidden="true">Leave this empty<input id="fb-hp" tabindex="-1" autocomplete="off"></label>' +
         (f.error ? '<p class="err" role="alert">' + esc(f.error) + "</p>" : "") +
         '<button class="pill solid" type="submit" style="justify-self:start;padding:9px 18px"' + (f.busy ? " disabled" : "") + ">" + (f.busy ? "Sending…" : "Send to Putri 💌") + "</button></form>";
     }
@@ -791,7 +790,7 @@
       html += '<span class="label">Putri’s to-try list</span>';
       html += sugg.length ? '<p class="sub" style="margin-top:-6px">Cafés friends suggested. Upvote the ones she should try next.</p><ul class="list totry">' + sugg.map(function (x) {
         var up = !!S.myUps[x.id];
-        return "<li><div><b>" + esc(x.cafe) + "</b><small>" + (x.district ? esc(x.district) + " · " : "") + "from " + esc(x.by) + (x.why ? " · “" + esc(x.why) + "”" : "") + "</small>" +
+        return "<li><div><b>" + esc(x.cafe) + "</b><small>" + (x.district ? esc(x.district) + " · " : "") + (x.why ? "“" + esc(x.why) + "”" : "") + "</small>" +
           '<div class="row-btns" style="margin-top:6px"><span class="tag-status' + (x.status === "tried" ? " done" : "") + '">' + (x.status === "tried" ? "Tried ✓" + (x.rating != null ? " ★ " + x.rating : "") : "To try") + "</span></div></div>" +
           '<button class="pill upv" data-up="' + x.id + '" aria-pressed="' + up + '" aria-label="Upvote ' + esc(x.cafe) + '">▲ ' + x.votes + "</button></li>";
       }).join("") + "</ul>" : '<p class="sub" style="margin-top:-6px">No suggestions yet. Be the first!</p>';
@@ -1002,7 +1001,7 @@
     if (e.target.id !== "fbform") return;
     e.preventDefault();
     var val = function (id) { var el = document.getElementById(id); return el ? el.value.trim() : ""; };
-    var body = { action: "feedback", type: S.fb.type, cafe: val("fb-cafe"), district: val("fb-district"), message: val("fb-msg"), name: val("fb-name"), website: val("fb-hp") };
+    var body = { action: "feedback", type: S.fb.type, cafe: val("fb-cafe"), district: val("fb-district"), message: val("fb-msg"), website: val("fb-hp") };
     if (body.type === "cafe" && !body.cafe) { S.fb.error = "Add the café’s name so Putri can find it."; route(true); return; }
     if (body.type !== "cafe" && !body.message) { S.fb.error = "Write a message first."; route(true); return; }
     S.fb.busy = true; S.fb.error = ""; route(true);

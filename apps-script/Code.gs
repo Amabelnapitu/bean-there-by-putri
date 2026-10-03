@@ -10,13 +10,14 @@
  * Upvotes on the to-try list go to a third tab, Upvotes.
  */
 
-// Optional: put your email here to get a copy of every new note.
+// Emails for new notes go to the Google account that owns this script.
+// To send them somewhere else, put that address between the quotes.
 var NOTIFY_EMAIL = '';
-// Optional: set to true to also get an email for every vote (needs NOTIFY_EMAIL).
-var NOTIFY_VOTES = false;
+var NOTIFY_NOTES = true;  // email me every new note
+var NOTIFY_VOTES = false; // set to true to also get an email for every vote
 
 var VOTE_HEADERS = ['Timestamp', 'Device', 'District', 'Café', 'Verdict', 'Comment'];
-var FEEDBACK_HEADERS = ['Timestamp', 'Device', 'Type', 'Café', 'District', 'Message', 'Name', 'Status', "Putri's Rating", 'Approved'];
+var FEEDBACK_HEADERS = ['Timestamp', 'Device', 'Type', 'Café', 'District', 'Message', 'Status', "Putri's Rating", 'Approved'];
 var UPVOTE_HEADERS = ['Timestamp', 'Device', 'Suggestion', 'Up'];
 
 function doGet(e) {
@@ -55,7 +56,14 @@ function doPost(e) {
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('Bean There')
     .addItem('Fill in café locations (Lat, Lng)', 'fillCoordinates')
+    .addItem('Send me a test email', 'sendTestEmail')
     .addToUi();
+}
+
+// Also asks Google for permission to send email the first time you run it.
+function sendTestEmail() {
+  notify_('Bean There: test email', 'It works! New notes from the site will arrive like this.');
+  SpreadsheetApp.getUi().alert('Test email sent to ' + (NOTIFY_EMAIL || Session.getEffectiveUser().getEmail()) + '.');
 }
 
 // Looks up every café in the APP tab that has no Lat, Lng yet and writes "lat, lng".
@@ -119,9 +127,9 @@ function vote_(body, device) {
 
   sheet_('Votes', VOTE_HEADERS).appendRow([new Date(), safe_(device), safe_(district), safe_(cafe), verdict, safe_(clean_(body.comment, 300))]);
   var comment = clean_(body.comment, 300);
-  if (NOTIFY_EMAIL && NOTIFY_VOTES && verdict !== 'none') {
-    var line = (verdict === 'agree' ? '👍 Agrees' : '👎 Disagrees') + ' with you on ' + cafe + ' (' + district + ')';
-    try { MailApp.sendEmail(NOTIFY_EMAIL, 'Bean There: ' + line, line + (comment ? '\n\nThey said: ' + comment : '')); } catch (err) { /* email is optional */ }
+  if (NOTIFY_VOTES && verdict !== 'none') {
+    var line = (verdict === 'agree' ? '👍 Someone agrees' : '👎 Someone disagrees') + ' with you on ' + cafe + ' (' + district + ')';
+    notify_('Bean There: ' + line, line + (comment ? '\n\nThey said: “' + comment + '”' : ''));
   }
   var tally = voteTally_()[key_(district, cafe)] || { agree: 0, disagree: 0 };
   return { ok: true, votes: tally };
@@ -137,17 +145,17 @@ function feedback_(body, device) {
   if (tooFast_('note:' + device, 60)) return { ok: false, error: 'Thanks! Please wait a minute before sending another note.' };
 
   var district = clean_(body.district, 80);
-  var name = clean_(body.name, 40);
-  sheet_('Feedback', FEEDBACK_HEADERS).appendRow([new Date(), safe_(device), type, safe_(cafe), safe_(district), safe_(message), safe_(name), type === 'cafe' ? 'todo' : '', '', '']);
+  var fb = feedbackSheet_();
+  fb.appendRow([new Date(), safe_(device), type, safe_(cafe), safe_(district), safe_(message), type === 'cafe' ? 'todo' : '', '', type === 'cafe' ? 'no' : '']);
 
-  if (NOTIFY_EMAIL) {
-    var label = { cafe: 'café suggestion', idea: 'idea or bug', hi: 'hello' }[type];
-    var lines = ['New ' + label + ' on Bean There', ''];
+  if (NOTIFY_NOTES) {
+    var label = { cafe: 'café suggestion', idea: 'idea or bug report', hi: 'hello' }[type];
+    var lines = [];
     if (cafe) lines.push('Café: ' + cafe + (district ? ' (' + district + ')' : ''));
-    if (message) lines.push('Message: ' + message);
-    lines.push('From: ' + (name || 'Anonymous'));
-    if (type === 'cafe') lines.push('', 'Set Approved to "yes" in the Feedback tab to show it on the to-try list.');
-    try { MailApp.sendEmail(NOTIFY_EMAIL, 'Bean There: new ' + label, lines.join('\n')); } catch (err) { /* email is optional */ }
+    if (message) lines.push((type === 'cafe' ? 'Why: ' : '') + '“' + message + '”');
+    if (type === 'cafe') lines.push('', 'To show it on the to-try list, set Approved to "yes" in the Feedback tab.');
+    lines.push('', 'Open the Feedback tab: ' + SpreadsheetApp.getActive().getUrl() + '#gid=' + fb.getSheetId());
+    notify_('Bean There: new ' + label + (cafe ? ' (' + cafe + ')' : ''), lines.join('\n'));
   }
   return { ok: true };
 }
@@ -201,13 +209,13 @@ function suggestions_() {
 
   var out = [];
   rows_('Feedback').forEach(function (r, i) {
-    var approved = String(r[9]).trim().toLowerCase();
+    var approved = String(r[8]).trim().toLowerCase();
     if (r[2] !== 'cafe' || ['yes', 'y', 'true', '✓', 'x'].indexOf(approved) === -1) return;
     var id = i + 2; // sheet row number
-    var rating = parseFloat(r[8]);
+    var rating = parseFloat(r[7]);
     out.push({
-      id: id, cafe: r[3], district: r[4], why: r[5], by: r[6] || 'Anonymous',
-      status: String(r[7]).trim().toLowerCase() === 'tried' ? 'tried' : 'todo',
+      id: id, cafe: r[3], district: r[4], why: r[5],
+      status: String(r[6]).trim().toLowerCase() === 'tried' ? 'tried' : 'todo',
       rating: isNaN(rating) ? null : rating, votes: ups[id] || 0
     });
   });
@@ -234,6 +242,25 @@ function tooFast_(key, seconds) {
   if (cache.get(key)) return true;
   cache.put(key, '1', seconds);
   return false;
+}
+
+function notify_(subject, body) {
+  var to = NOTIFY_EMAIL || Session.getEffectiveUser().getEmail();
+  if (!to) return;
+  try { MailApp.sendEmail(to, subject, body); } catch (err) { console.warn('Email failed: ' + err); }
+}
+
+// The Feedback tab, with Status and Approved dropdowns.
+function feedbackSheet_() {
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName('Feedback');
+  if (sh) return sh;
+  sh = sheet_('Feedback', FEEDBACK_HEADERS);
+  var rows = sh.getMaxRows() - 1;
+  sh.getRange(2, 7, rows, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(['todo', 'tried'], true).setAllowInvalid(true).build());
+  sh.getRange(2, 9, rows, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(['yes', 'no'], true).setAllowInvalid(true).build());
+  sh.setColumnWidth(6, 320);
+  return sh;
 }
 
 function sheet_(name, headers) {

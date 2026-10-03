@@ -50,7 +50,7 @@ hangs off a bus route from Central.
 ### 2. Votes and notes: deploy the Apps Script
 1. Open the **Review** sheet → **Extensions → Apps Script**.
 2. Delete what's there and paste in everything from `apps-script/Code.gs`. Click **Save**.
-3. Optional: set `NOTIFY_EMAIL` at the top to your email to get a copy of every note. Also set `NOTIFY_VOTES = true` to get an email for every vote (with the voter's note, if they left one).
+3. New notes are emailed to the Google account that owns the script (change `NOTIFY_EMAIL` to send them elsewhere). Set `NOTIFY_VOTES = true` to also get an email for every vote. Use the sheet menu **Bean There → Send me a test email** to allow email and check it arrives.
 4. **Deploy → New deployment** → gear icon → **Web app**.
    - Execute as: **Me**
    - Who has access: **Anyone**
@@ -62,7 +62,7 @@ Until `apiUrl` is set, the votes and note screens say "opening soon"; everything
 The script creates these tabs in the sheet on first use:
 
 - **Votes:** Timestamp · Device · District · Café · Verdict · Comment. Only each phone's latest vote per café counts. Comments are private: they only appear in this tab.
-- **Feedback:** Timestamp · Device · Type · Café · District · Message · Name · Status · Putri's Rating · Approved.
+- **Feedback:** Timestamp · Device · Type · Café · District · Message · Status · Putri's Rating · Approved. Notes are anonymous. Status and Approved are dropdowns.
   - Café suggestions only show on the to-try list once you type `yes` in **Approved**.
   - Set **Status** to `tried` (and optionally fill **Putri's Rating**) to show "Tried ✓".
 - **Upvotes:** Timestamp · Device · Suggestion · Up.
