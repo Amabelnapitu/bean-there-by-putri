@@ -180,7 +180,12 @@ function syncFromCafe_(silent) {
     var appValues = appSh.getDataRange().getValues();
     var head = appValues[0].map(function (h) { return String(h).toLowerCase().replace(/[^a-z]/g, ''); });
     var col = function (k) { return head.indexOf(k); };
-    var C = { district: col('district'), name: col('name'), rating: col('rating'), order: col('mustorder'), drink: col('drink'), price: col('price'), note: col('note') };
+    // "Added" = the date a café first appeared, used for "New this month" on the site.
+    if (col('added') === -1) {
+      appSh.getRange(1, head.length + 1).setValue('Added').setFontWeight('bold');
+      head.push('added');
+    }
+    var C = { district: col('district'), name: col('name'), rating: col('rating'), order: col('mustorder'), drink: col('drink'), price: col('price'), note: col('note'), added: col('added') };
     if (C.district === -1 || C.name === -1) return 'The APP tab needs District and Name columns.';
     var appRows = appValues.slice(1).map(function (r, i) { return { row: i + 2, district: String(r[C.district]).trim(), name: String(r[C.name]).trim() }; })
       .filter(function (r) { return r.name; });
@@ -216,8 +221,10 @@ function syncFromCafe_(silent) {
       if (C.drink !== -1) row[C.drink] = guessDrink_(cur.o);
       if (C.price !== -1) row[C.price] = cur.p;
       if (C.note !== -1) row[C.note] = cur.v;
+      row[C.added] = new Date();
       appSh.appendRow(row.map(function (v) { return typeof v === 'string' ? safe_(v) : v; }));
       var r = appSh.getLastRow();
+      appSh.getRange(r, C.added + 1).setNumberFormat('yyyy-mm-dd');
       appSh.getRange(r, 1, 1, head.length).setBackground('#EFE6FA');
       appSh.getRange(r, C.name + 1).setNote('New from the Cafe tab on ' + today + '. Add Rank, Taste and Tags if you like.');
       next[it.district + '|' + it.name] = cur;

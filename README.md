@@ -32,6 +32,7 @@ One row per café:
 | Taste | `milky`, `strong`, `smooth`, `weak`, `nutty`, `chocolatey`, `fruity`, `roasty` (separate with `;`) | milky;nutty |
 | Tags | `work-friendly`, `cozy`, `cute`, `takeaway-only`, `small-space`, `small-portion`, `no-ports`, `time-limit`, `cheap`, `pricey`, `cash-only`, `closed` | cozy;cheap |
 | Maps Link | Optional Google Maps link (otherwise the app searches by name + district) | https://maps.app.goo.gl/… |
+| Added | Date the café was added (filled in automatically by the sync for new cafés). Drives "New in October" on Putri's Palate and the New badge for 31 days | 2026-10-11 |
 | Lat, Lng | Optional. Fill it automatically with the sheet menu **Bean There → Fill in café locations**, or in Google Maps long-press the café and copy the numbers. With these, the crawl picks the shortest walking order and shows distances | 22.2866, 114.1500 |
 
 Taste Match uses Rating, Drink, Taste and the `cheap`/`pricey` tags. Closed cafés never show as a top pick.

@@ -112,6 +112,20 @@
     return "Other";
   }
 
+  // Accepts 2026-10-11, 11/10/2026 (day first, as in Hong Kong) or "11 Oct 2026".
+  function parseDate(v) {
+    v = String(v || "").trim();
+    if (!v) return null;
+    var m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(v);
+    if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+    m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(v);
+    if (m) return new Date(+m[3], +m[2] - 1, +m[1]);
+    var d = new Date(v);
+    return isNaN(d) ? null : d;
+  }
+  function isNew(c) { return c.added && Date.now() - c.added.getTime() < 31 * 864e5; }
+  var MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
   function parseCoords(v) {
     var m = /(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/.exec(v || "");
     return m ? [parseFloat(m[1]), parseFloat(m[2])] : null;
@@ -132,6 +146,7 @@
         id: i, district: o.district, name: o.name, rank: isNaN(rank) ? null : rank, rating: isNaN(rating) ? null : rating,
         order: order, drink: drink, price: o.price || "", note: o.note || o.review || "",
         taste: splitList(o.taste), tags: tags, closed: tags.indexOf("closed") !== -1, maps: o.mapslink || "",
+        added: parseDate(o.added || o.dateadded || o.datevisited || o.visited || ""),
         coords: parseCoords(o.latlng || o.coordinates || ((o.lat || o.latitude) && (o.lng || o.lon || o.longitude) ? (o.lat || o.latitude) + "," + (o.lng || o.lon || o.longitude) : ""))
       };
     }).filter(function (c) { return c.district && c.name; });
@@ -333,7 +348,7 @@
     opts = opts || {};
     var m = S.profile ? match(c, S.profile) : null;
     return '<article class="card"><div class="card-head"><span class="rank r' + (i + 1) + '">' + (i + 1) + "</span>" +
-      "<div><h3><a class=\"cafe-link\" href=\"" + cafeHref(c) + "\">" + esc(c.name) + '</a></h3><span class="meta">Putri ★ ' + (c.rating == null ? "–" : c.rating) + (opts.district ? " · " + esc(c.district) : "") + "</span></div>" +
+      "<div><h3><a class=\"cafe-link\" href=\"" + cafeHref(c) + "\">" + esc(c.name) + '</a></h3><span class="meta">' + (isNew(c) ? '<span class="new-badge">New</span> ' : "") + "Putri ★ " + (c.rating == null ? "–" : c.rating) + (opts.district ? " · " + esc(c.district) : "") + "</span></div>" +
       (m ? '<span class="match" title="Your Taste Match">' + m.score + "%</span>" : "") + "</div>" +
       (c.order ? '<p class="order">Get: <b>' + esc(c.order) + "</b>" + (price(c) ? ' <span class="meta">· ' + esc(price(c)) + "</span>" : "") + "</p>" : "") +
       (c.note ? '<p class="note">“' + esc(c.note) + "”</p>" : "") +
@@ -574,7 +589,10 @@
     function avg(a) { return a.reduce(function (s, x) { return s + x; }, 0) / a.length; }
     function n(f) { return cafes.filter(f).length; }
     var rated = cafes.filter(function (c) { return c.rating != null; });
-    var spent = cafes.reduce(function (s, c) { return s + firstPrice(c); }, 0);
+    var now = new Date();
+    var dated = cafes.filter(function (c) { return c.added; }).sort(function (a, b) { return b.added - a.added; });
+    var thisMonth = dated.filter(function (c) { return c.added.getFullYear() === now.getFullYear() && c.added.getMonth() === now.getMonth(); });
+    var newList = thisMonth.length ? thisMonth : dated.slice(0, 3);
     var fives = open.filter(function (c) { return c.rating === 5; });
     var byDrink = {};
     rated.forEach(function (c) { (byDrink[c.drink] = byDrink[c.drink] || []).push(c.rating); });
@@ -596,9 +614,13 @@
 
     return '<div class="pad">' +
       '<div class="hero-p">' + mascot("hero-cup") + '<div><span class="label" style="margin:0;color:inherit;opacity:.75">Putri’s Palate</span><h1>Professional over-caffeinator</h1><p>Reviewing Hong Kong coffee since Nov 2024</p></div></div>' +
-      '<div class="stats4"><div class="stat"><b>' + cafes.length + '</b><small>cafés tried</small></div><div class="stat"><b>HK$' + spent.toLocaleString("en") + "</b><small>spent (roughly…)</small></div>" +
+      '<div class="stats4"><div class="stat"><b>' + cafes.length + '</b><small>cafés tried</small></div><div class="stat"><b>' + districts.length + "</b><small>districts explored</small></div>" +
       '<div class="stat"><b>' + fives.length + '</b><small>perfect 5s</small></div>' +
       (most ? '<div class="stat"><b>' + byDrink[most].length + "</b><small>" + esc(most.toLowerCase()) + "s, her most-ordered</small></div>" : "") + "</div>" +
+      (newList.length ? '<span class="label">' + (thisMonth.length ? "☕ New in " + MONTHS[now.getMonth()] + " (" + thisMonth.length + ")" : "☕ Latest additions") + "</span>" +
+        '<ul class="list">' + newList.map(function (c) {
+          return '<li><a class="row" href="' + cafeHref(c) + '"><span class="n">✦</span><div><b>' + esc(c.name) + "</b><small>" + esc(c.district) + " · added " + c.added.getDate() + " " + MONTHS[c.added.getMonth()].slice(0, 3) + (c.order ? " · get " + esc(c.order) : "") + '</small></div><span class="score">' + (c.rating != null ? "★ " + c.rating : "") + "</span></a></li>";
+        }).join("") + "</ul>" : "") +
       (happiest ? '<div class="quote">“' + esc(DRINK_VOICE[happiest]) + "”<small>Her happiest drink: " + esc(happiest) + " averages ★ " + avg(byDrink[happiest]).toFixed(1) + ", the highest of anything she orders.</small></div>" : "") +
       '<span class="label">How Putri rates</span><div class="hist" role="img" aria-label="How many cafés got each rating">' + buckets.map(function (b, i) {
         return '<div class="hrow' + (counts[i] === max ? " peak" : "") + '"><span>★ ' + b[0] + '</span><span class="htrack"><i style="width:' + (counts[i] / max * 100) + '%"></i></span><span>' + counts[i] + "</span></div>";
