@@ -44,6 +44,8 @@ hangs off a bus route from Central.
 `data/cafes.csv` is a saved copy the site falls back to if the sheet can't be reached.
 
 ### Keeping the APP tab in sync with the Cafe tab
+
+The same sync also copies the **Restaurant** tab into the **FOOD** tab (for the restaurant app), using a hidden `_sync_food` tab. Both run from **Bean There → Sync app tabs**.
 Keep reviewing in the **Cafe** tab as usual, then use the sheet menu **Bean There → Sync APP tab from Cafe tab**
 (or **Turn on auto-sync** so it runs after every edit). It only copies what changed:
 
