@@ -45,6 +45,10 @@ hangs off a bus route from Central.
 
 `data/cafes.csv` is a saved copy the site falls back to if the sheet can't be reached.
 
+### Bars, desserts and Out & About
+
+The same script also syncs the **Bar** tab into a **BAR** tab and a **Dessert** tab into a **DESSERT** tab (created automatically on the first sync once a Dessert tab exists) for [Out & About](https://github.com/Amabelnapitu/out-and-about). Votes and notes from Out & About go through this same web app: votes carry a Kind (`food`, `bar`, `dessert`), and notes can be suggestions for any kind of place or a report that a place has closed.
+
 ### Keeping the APP tab in sync with the Cafe tab
 
 The same sync also copies the **Restaurant** tab into the **FOOD** tab (for the restaurant app), using a hidden `_sync_food` tab. Both run from **Bean There → Sync app tabs**.

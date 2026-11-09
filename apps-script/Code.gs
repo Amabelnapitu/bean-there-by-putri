@@ -16,7 +16,10 @@ var NOTIFY_EMAIL = '';
 var NOTIFY_NOTES = true;  // email me every new note
 var NOTIFY_VOTES = false; // set to true to also get an email for every vote
 
-var VOTE_HEADERS = ['Timestamp', 'Device', 'District', 'Café', 'Verdict', 'Comment'];
+var VOTE_HEADERS = ['Timestamp', 'Device', 'District', 'Café', 'Verdict', 'Comment', 'Kind'];
+// Which app tab each kind of place lives in (Bean There sends no kind: that means café).
+var KIND_TABS = { cafe: 'APP', food: 'FOOD', bar: 'BAR', dessert: 'DESSERT' };
+var KIND_WORD = { cafe: 'café', food: 'restaurant', bar: 'bar', dessert: 'dessert spot' };
 var FEEDBACK_HEADERS = ['Timestamp', 'Device', 'Type', 'Café', 'District', 'Message', 'Status', "Putri's Rating", 'Approved'];
 var UPVOTE_HEADERS = ['Timestamp', 'Device', 'Suggestion', 'Up'];
 
@@ -55,7 +58,7 @@ function doPost(e) {
 // Adds a "Bean There" menu to the sheet.
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('Bean There')
-    .addItem('Sync app tabs (Cafe → APP, Restaurant → FOOD)', 'syncFromCafe')
+    .addItem('Sync app tabs (Cafe → APP, Restaurant → FOOD, Bar → BAR, Dessert → DESSERT)', 'syncFromCafe')
     .addItem('Turn on auto-sync', 'turnOnAutoSync')
     .addItem('Turn off auto-sync', 'turnOffAutoSync')
     .addSeparator()
@@ -165,9 +168,19 @@ var NAME_STOPWORDS = ['the', 'and', 'a', 's', 'co', 'coffee', 'cafe', 'roasters'
 // Each source tab and the app tab it feeds. `fill` suggests values for a new row's extra columns.
 var SYNC_SOURCES = [
   { id: 'cafe', source: 'Cafe', target: 'APP', snapshot: '_sync', what: 'café', fill: function (cur) { return { drink: guessDrink_(cur.o), tags: guessTags_('cafe', cur) }; } },
-  { id: 'food', source: 'Restaurant', target: 'FOOD', snapshot: '_sync_food', what: 'restaurant', fill: function (cur) { return { cuisine: guessCuisine_(cur.o), tags: guessTags_('food', cur) }; } }
+  { id: 'food', source: 'Restaurant', target: 'FOOD', snapshot: '_sync_food', what: 'restaurant', fill: function (cur) { return { cuisine: guessCuisine_(cur.o), tags: guessTags_('food', cur) }; } },
+  { id: 'bar', source: 'Bar', target: 'BAR', snapshot: '_sync_bar', what: 'bar', fill: function (cur, it) { return { type: barType_(it.type), tags: guessTags_('bar', cur, it.type) }; } },
+  // The DESSERT tab is created automatically the first time you sync after adding a "Dessert" tab.
+  { id: 'dessert', source: 'Dessert', target: 'DESSERT', snapshot: '_sync_dessert', what: 'dessert spot', create: ['District', 'Name', 'Rank', 'Rating', 'Must Order', 'Price', 'Note', 'Tags', 'Maps Link', 'Lat, Lng', 'Added'], fill: function (cur) { return { tags: guessTags_('dessert', cur) }; } }
 ];
-function baselineFor_(id) { return id === 'food' ? FOOD_BASELINE : SYNC_BASELINE; }
+function baselineFor_(id) { return { cafe: SYNC_BASELINE, food: FOOD_BASELINE, bar: BAR_BASELINE }[id] || {}; }
+
+function barType_(s) {
+  s = String(s || '').toLowerCase();
+  if (/both|then|club after|and club/.test(s)) return 'Both';
+  if (/club/.test(s)) return 'Club';
+  return 'Bar';
+}
 
 function syncFromCafe() {
   alert_(syncAll_(false));
@@ -185,7 +198,7 @@ function onCafeEdit(e) {
 function turnOnAutoSync() {
   turnOffAutoSync_();
   ScriptApp.newTrigger('onCafeEdit').forSpreadsheet(SpreadsheetApp.getActive()).onEdit().create();
-  alert_('Auto-sync is on. Edits to the Cafe and Restaurant tabs now update the APP and FOOD tabs by themselves (give it a few seconds).');
+  alert_('Auto-sync is on. Edits to the Cafe, Restaurant, Bar and Dessert tabs now update the APP, FOOD, BAR and DESSERT tabs by themselves (give it a few seconds).');
 }
 
 function turnOffAutoSync() {
@@ -205,7 +218,13 @@ function syncAll_(silent) {
   try {
     var ss = SpreadsheetApp.getActive();
     var msgs = SYNC_SOURCES.map(function (cfg) {
-      if (!sheetByName_(ss, cfg.target)) return silent ? '' : cfg.target + ' tab: not set up yet (skipped).';
+      if (!sheetByName_(ss, cfg.target)) {
+        if (cfg.create && sheetByName_(ss, cfg.source)) {
+          var made = ss.insertSheet(cfg.target);
+          made.getRange(1, 1, 1, cfg.create.length).setValues([cfg.create]).setFontWeight('bold');
+          made.setFrozenRows(1);
+        } else return silent ? '' : cfg.target + ' tab: not set up yet (skipped).';
+      }
       return cfg.target + ' tab: ' + syncTab_(ss, cfg, silent);
     }).filter(String);
     if (!silent) msgs.push('The websites pick this up within about 5 minutes.');
@@ -268,14 +287,14 @@ function syncTab_(ss, cfg, silent) {
     if (C.order !== -1) row[C.order] = cur.o;
     if (C.price !== -1) row[C.price] = cur.p;
     if (C.note !== -1) row[C.note] = cur.v;
-    var extra = cfg.fill(cur);
+    var extra = cfg.fill(cur, it);
     Object.keys(extra).forEach(function (k) { if (col(k) !== -1) row[col(k)] = extra[k]; });
     row[C.added] = new Date();
     appSh.appendRow(row.map(function (v) { return typeof v === 'string' ? safe_(v) : v; }));
     var r = appSh.getLastRow();
     appSh.getRange(r, C.added + 1).setNumberFormat('yyyy-mm-dd');
     appSh.getRange(r, 1, 1, head.length).setBackground('#EFE6FA');
-    appSh.getRange(r, C.name + 1).setNote('New from the ' + cfg.source + ' tab on ' + today + '. ' + (cfg.id === 'food' ? 'Cuisine' : 'Drink') + ', Tags and Rank were filled in automatically: check them' + (cfg.id === 'cafe' ? ', and add Taste' : '') + '.');
+    appSh.getRange(r, C.name + 1).setNote('New from the ' + cfg.source + ' tab on ' + today + '. ' + ({ cafe: 'Drink, ', food: 'Cuisine, ', bar: 'Type, ' }[cfg.id] || '') + 'Tags and Rank were filled in automatically: check them' + (cfg.id === 'cafe' ? ', and add Taste' : '') + '.');
     next[it.district + '|' + it.name] = cur;
     rerank[it.district] = true;
     added.push(it.name + ' (' + it.district + ')');
@@ -301,7 +320,7 @@ function syncTab_(ss, cfg, silent) {
 
 function guessTags_(kind, cur) {
   var s = (cur.o + ' ' + cur.v).toLowerCase(), review = String(cur.v).toLowerCase();
-  var price = parseInt(String(cur.p).replace(/[^0-9\/ ~\-]/g, ''), 10);
+  var price = parseInt((String(cur.p).match(/\d+/) || [''])[0], 10);
   var tags = [];
   function add(tag, yes) { if (yes && tags.indexOf(tag) === -1) tags.push(tag); }
   var smallPortion = /portion[^.]*small|small portion|size too small|volume is (so )?(less|small)/.test(review);
@@ -336,6 +355,25 @@ function guessTags_(kind, cur) {
     add('healthy', /healthy/.test(review) || /^(byo |build[- ]your[- ]own )?salad|salad bowl|poke/.test(String(cur.o).toLowerCase()));
     add('cute', /cute/.test(review));
     add('group', /group|sharing|to share|with friends/.test(review));
+  } else if (kind === 'bar') {
+    var type = barType_(arguments[2]);
+    add('cocktails', /cocktail|negroni|daiquiri|g&t|gin|spritz|sangria|margarita|martini|mojito|sour/.test(s));
+    add('wine', /wine/.test(s));
+    add('shots', /shot|jäger|jager|tequila/.test(s));
+    add('dancing', type !== 'Bar' || /danc|dj|club/.test(review));
+    add('pretty', /pretty|cute|decor|beautiful|gorgeous/.test(review));
+    add('small-space', smallSpace);
+    add('crowded', /crowded|packed|busy/.test(review));
+    add('best-on-weekdays', /weekday/.test(review));
+    add('free-shots', /free shot/.test(review));
+    add('cheap', hasPrice && price < 100);
+    add('pricey', pricey || (hasPrice && price >= 160));
+  } else if (kind === 'dessert') {
+    add('value', value);
+    add('pricey', pricey);
+    add('small-space', smallSpace);
+    add('small-portion', smallPortion);
+    add('cute', /cute/.test(review));
   }
   return tags.join(';');
 }
@@ -562,16 +600,17 @@ function parseCafeRows_(values) {
     for (var i = 0; i < head.length; i++) if (head[i].indexOf(prefix) === 0) return i;
     return fallback;
   }
-  var L = find('location', 0), N = find('no', 1), NAME = find('name', 2), O = find('order', 3), P = find('price', 4), R = find('rate', 5), V = find('review', 6);
+  var L = find('location', 0), N = find('no', 1), NAME = find('name', 2), O = find('order', 3), P = find('price', 4), R = find('rate', 5);
+  var V = find('review', find('comment', 6)), K = find('barclub', find('type', -1));
   var out = [], district = '', cur = null;
   function text(v) { return String(v == null ? '' : v).replace(/\s+/g, ' ').trim(); }
   for (var i = 1; i < values.length; i++) {
     var row = values[i];
     if (text(row[L])) district = canonDistrict_(text(row[L]));
-    var no = text(row[N]), name = text(row[NAME]), order = text(row[O]), price = text(row[P]), rate = text(row[R]), review = text(row[V]);
+    var no = text(row[N]), name = text(row[NAME]), order = text(row[O]), price = text(row[P]), rate = text(row[R]), review = text(row[V]), kind = K === -1 ? '' : text(row[K]);
     if (!no && !name && !order && !price && !rate && !review) continue;
     if (no || name || !cur) {
-      cur = { district: district, name: name, orders: [], prices: [], rating: '', reviews: [] };
+      cur = { district: district, name: name, orders: [], prices: [], rating: '', reviews: [], type: kind };
       out.push(cur);
     }
     if (order) cur.orders.push(order);
@@ -689,48 +728,63 @@ var SYNC_BASELINE = {"Kennedy Town|Blend & Grind":{"r":"4.5","p":"154 (Lunch Set
 // Same for the Restaurant tab, as it was when the FOOD tab was built.
 var FOOD_BASELINE = {"Kennedy Town|Nom Nom Dumplings":{"r":"4.7","p":"70","o":"Soup Dumpling + Wood Ear mushroom salad + Steamed Dumplings","v":"Very good, worth money."},"Kennedy Town|Pici":{"r":"4","p":"130","o":"Beef Tagliatalle, Tiramisu","v":"Super good value for lunch set."},"Sai Ying Pun|Catch":{"r":"5","p":"150-170","o":"Tacos, Margarita, Angel Hair Crab Pasta","v":"Love the tacos! Best spot for taco tuesday."},"Sai Ying Pun|El Macho":{"r":"4.5","p":"160-180","o":"Qusedilla, Taco (Beef and Shrimp), Nachos","v":"Pretty good! I dream about their Burrito once in a while."},"Sai Ying Pun|Birria Y Birria":{"r":"5","p":"150","o":"Birria Ramen, Beef Taco","v":"The rame is sooo good! Like so so good."},"Sai Ying Pun|Rajdoot":{"r":"5","p":"82","o":"Paneer Tikka and Butter Naan","v":"Always good!"},"Repulse Bay|Dough Bros":{"r":"5","p":"120~150","o":"A lot of different ones LMAO","v":"Go To Pizza Place."},"Sheung Wan|An Choi":{"r":"4.5","p":"75","o":"Chicken Bhan Mi","v":"Really good bahmi good for value."},"Sheung Wan|Samsen":{"r":"4","p":"","o":"Chicken Curry Noodles","v":"Good but too thick and strong coconut flavour."},"Wan Chai|Samsen":{"r":"4","p":"108","o":"Pad Thai","v":"V good but V expensive."},"Wan Chai|27 Kebab House":{"r":"5","p":"200ish","o":"Chicken Kebab + Chicken Tikka","v":"Super good food, super worth the money."},"Wan Chai|Fini's":{"r":"2","p":"238","o":"Fini's Pizza + Meatball app","v":"Super pricey the food is really not great. I cook better then that haha."},"Wan Chai|The Optimist":{"r":"3","p":"250","o":"Salmon Fillet","v":"V meh, too pricey for what it is."},"Wan Chai|Chukfo Taipan":{"r":"4.5","p":"85","o":"The golden smthng ( have all the meats)","v":"Love this siumei place! The place is a little cramp tho."},"Wan Chai|Mum Mum Thai":{"r":"3.7","p":"167","o":"Tom Yum Steam Egg + Papaya Salad + Crab Fried Rice","v":"For the price actually okay, but would only go back for the Tom Yum Steam egg. The other dishes are quite meh."},"Wan Chai|Zaap Thai":{"r":"4.1","p":"78","o":"Pad Thai","v":"Good option for lunch, really heavy tho."},"Wan Chai|Fancy Salad":{"r":"5","p":"79","o":"BYO Salad","v":"Super good option for lunch, huge portion."},"Wan Chai|Woodlands":{"r":"5","p":"250","o":"Oonam Set","v":"Fun experience and good food!"},"Wan Chai|JoJo":{"r":"5","p":"~250","o":"Weekend Lunch Buffet","v":"Great options, value for money."},"Mong Kok|No Money So Lonely":{"r":"3.3","p":"149","o":"Curry Fried Rice","v":"Food okay, a bit sweet."},"Mong Kok|Dim Dim Sum":{"r":"4.5","p":"120~150","o":"Variety of Dim Sum","v":"Love the dumplings, best Siu Mai."},"Mong Kok|Soul Noodles":{"r":"5","p":"86","o":"Yukgaejang Noodles","v":"Love this place."},"Mong Kok|Rosjad":{"r":"4","p":"89","o":"Thai Basil Minced Pork","v":"Super good! Actually spicy so that's nice."},"Mong Kok|HeSheEat":{"r":"3.7","p":"100","o":"Basil Pasta, Kakigori, Parfait","v":"The food is not good, the dessert is okay."},"Causeway Bay|Shang Hai LaoLao":{"r":"4.5","p":"64 / 59","o":"Peanut Noodle + Spicy Wonton","v":"Good for Value very good."},"Causeway Bay|Dalat Vietnamese":{"r":"4.3","p":"70","o":"Beef Pho","v":"Really good pho especially for that price."},"Causeway Bay|Chuan Man Ju":{"r":"5","p":"140","o":"Dried Hot Pot","v":"Sooo good! Better than 12 flavors."},"Causeway Bay|Diliwali":{"r":"4","p":"180","o":"Chicken Tikka, Paneer Masala, Naan","v":"Solid! But portion a little small."},"Causeway Bay|Mother of Pizza":{"r":"5","p":"200","o":"Margarita, Meat Lover, Garlic Bread","v":"Best garlic bread EVER! Pizza also really good."},"Causeway Bay|Milk Cafe":{"r":"5","p":"60-70","o":"Yang Zhou Fried Rice, Siu Mei, Spicy Clambroth Noodles","v":"Love this! Affordable and good."},"Causeway Bay|Pizza Maru":{"r":"4","p":"120","o":"Garlic Cheese Chicken, Halapejo Chicken Pizza","v":"This is good, not like italian pizza and kind of sweet."},"Causeway Bay|Casa Cucina":{"r":"3","p":"~200","o":"Carbonara, Pizza (had grapes and anchovies topping)","v":"Carbonara good but the pizza was so weird, too pricey for what it is imo."},"Central|Motorino":{"r":"5","p":"120","o":"Cheese Pizza + Margeritha","v":"Very good pizza. If book through open rice, get free tiramisu."},"Central|Pizza Project":{"r":"5","p":"150~200","o":"Meat, Veg, Cheese","v":"Very good pizza."},"Central|Holy Eats":{"r":"4","p":"118","o":"Teriyaki Chicken Bowl","v":"Pretty good, solid lunch deal."},"Central|Buchon Francis":{"r":"4","p":"180","o":"Grilled Chicken and Tomato","v":"I would go again only for the set, I think the set is very good value for money."},"Central|Barkada":{"r":"2","p":"210","o":"Shared Platter, Chicharon and Fries","v":"Food was good but I got sick :(."},"Central|Prime Pho":{"r":"3.7","p":"98","o":"Beef Brisket Pho","v":"It's good! The broth is v nice."},"Central|La Vache":{"r":"3","p":"418","o":"Steak and Frites","v":"Not that big fan of steaks but the fries are nice."},"Central|La Camionetta":{"r":"3.7","p":"180","o":"Quatro Cheese, Simply Porscuito","v":"It's okay, wouldn't go back if I have the choice."},"Central|Chaiwala":{"r":"3.5","p":"160","o":"Samosa Chaat, Chicken Tikka, Naan","v":"A little pricy for what it is, had better."},"Central|Circus Burger":{"r":"4","p":"110","o":"Beef Cheese Burger","v":"Feels like the definition of a burger, the fries are okay."},"Central|Papa Gomez":{"r":"5","p":"80-90","o":"Burger, Chicken Tikka Wrap, Chilli Hot Dog","v":"The food slaps! Disclaimer: Only had this drunk, do not know what it taste like sober :)"},"Central|Twist Pasta Bar":{"r":"5","p":"~180","o":"Seafood Liguini, Rigattoni with Cheese and Carbonara","v":"Really yum would be down to try their seasonal menu."},"Central|The Spoon":{"r":"5","p":"196","o":"Daily Special (Chicken Breast with like some cheese pasta) and sea food brown butter rigattoni","v":"Really yum would be down to try again."},"Central|Fiata Pizza":{"r":"4","p":"~200","o":"Margeritha","v":"It's the sourdough pizza, and I really like chewy pizza so this place is right up my alley."},"Admiralty|ChullsChick":{"r":"4","p":"170","o":"1/2 Chicken with Fries","v":"Portion HUGE, feels like a healthy but delicious meal."},"Tsim Sha Tsui|Gaylord":{"r":"5","p":"200","o":"[Forgot hehe]","v":"Super good but kind of pricey, honestly worth the value."},"Tsim Sha Tsui|Yugu Noodles":{"r":"5","p":"68","o":"The cold spicy sour noodles","v":"My absolute go to noodle place."},"Tsim Sha Tsui|幕多":{"r":"5","p":"98","o":"Japanese Shrimp Ramen","v":"Super nice broth and love the noodles texture."},"Tsim Sha Tsui|Ruen":{"r":"4.3","p":"200","o":"Steam Fish, Kung Pai Chicken, and Stir-fried morning glory","v":"Cute vibes and the food very good! Super close to home foods."},"Sha Tin|Le Tat Su":{"r":"4","p":"89","o":"Dinner Set, Hot Pot","v":"Super good value for money!"},"Sha Tin|Greyhound":{"r":"3.3","p":"80","o":"Thai Basil Minced Pork","v":"Very meh, too pricey."},"Sha Tin|DZO DZO":{"r":"4","p":"83","o":"Bun Rieu","v":"Lunch set, pretty solid but l ike wouldn't go back again if have other options."},"Admiralty|Fini's":{"r":"2","p":"200","o":"Margarita Pizza and Meatballs","v":"It's not even good and so pricey."}};
 
+// What the Bar tab looked like when the BAR tab was built.
+var BAR_BASELINE = {"Central|Gishiki Lounge":{"r":"4.5","p":"120","o":"Hannaya","v":"Nice vibes, good cocktail."},"Central|Maggie Choo":{"r":"4.5","p":"158","o":"All cocktails","v":"Love the cocktail, nice vibes."},"Central|Tell Camilla":{"r":"5","p":"~175","o":"All cocktails","v":"The cocktail delicious, really enjoyed the free shots hehe."},"Central|HCode":{"r":"4","p":"95","o":"White Wine","v":"Okay, it's white wine..."},"Central|Zzura":{"r":"3.7","p":"130","o":"Dry Grape","v":"It's okay, the vibes are cute."},"Central|Barcode":{"r":"4","p":"~150","o":"Mango Sticky Rice, Watermelon Negroni","v":"I like the Mango Sticky Rice the place is super small tho."},"Central|COA":{"r":"","p":"","o":"","v":""},"Central|Club Feather":{"r":"","p":"","o":"Mango Daiquiri","v":""},"Central|Missions":{"r":"","p":"~100","o":"White Wine","v":""},"Central|Grape Vine":{"r":"","p":"","o":"","v":""},"Central|33":{"r":"","p":"","o":"","v":""},"Sai Ying Pun|Ping Pong 129":{"r":"4.5","p":"150","o":"Raspberry G&T","v":"Cute vibes, good drinks."},"Sai Ying Pun|Junels":{"r":"","p":"","o":"Sangria, Jagger Bomb , Aperol Spritz","v":""},"Tsim Sha Tsui|The Library":{"r":"","p":"","o":"","v":""},"Central|Iron Fairies":{"r":"4.7","p":"130 pp","o":"All cocktails","v":"V pretty deco, go on weekdays."},"Central|Penicillin":{"r":"4","p":"125","o":"Wear No Evil","v":"The cocktails wasn't that strong but the flavor is good."},"Central|La Boudoir":{"r":"4","p":"85","o":"Vodka shots","v":"The drink is just a shot like every where else But the vibes are nice, dj pretty good can get too crowded tho."}};
+
 
 // ---------- Actions ----------
 
 function vote_(body, device) {
   var district = clean_(body.district, 80);
   var cafe = clean_(body.name, 80);
+  var kind = KIND_TABS[body.kind] ? body.kind : 'cafe';
   var verdict = body.verdict;
   if (['agree', 'disagree', 'none'].indexOf(verdict) === -1) return { ok: false, error: 'Unknown vote.' };
-  if (!cafeExists_(district, cafe)) return { ok: false, error: 'That café isn’t on the list.' };
+  if (!placeExists_(kind, district, cafe)) return { ok: false, error: 'That ' + KIND_WORD[kind] + ' isn’t on the list.' };
   if (tooFast_('vote:' + device, 2)) return { ok: false, error: 'Easy there! Try again in a second.' };
 
-  sheet_('Votes', VOTE_HEADERS).appendRow([new Date(), safe_(device), safe_(district), safe_(cafe), verdict, safe_(clean_(body.comment, 300))]);
+  var sh = sheet_('Votes', VOTE_HEADERS);
+  if (sh.getLastColumn() < 7) sh.getRange(1, 7).setValue('Kind');
+  sh.appendRow([new Date(), safe_(device), safe_(district), safe_(cafe), verdict, safe_(clean_(body.comment, 300)), kind === 'cafe' ? '' : kind]);
   var comment = clean_(body.comment, 300);
   if (NOTIFY_VOTES && verdict !== 'none') {
     var line = (verdict === 'agree' ? '👍 Someone agrees' : '👎 Someone disagrees') + ' with you on ' + cafe + ' (' + district + ')';
-    notify_('Bean There: ' + line, line + (comment ? '\n\nThey said: “' + comment + '”' : ''));
+    notify_('Out & About: ' + line, line + (comment ? '\n\nThey said: “' + comment + '”' : ''));
   }
-  var tally = voteTally_()[key_(district, cafe)] || { agree: 0, disagree: 0 };
+  var tally = voteTally_()[voteKey_(kind, district, cafe)] || { agree: 0, disagree: 0 };
   return { ok: true, votes: tally };
+}
+
+// Cafés keep their old keys ("District|Name") so Bean There's tallies don't change.
+function voteKey_(kind, district, name) {
+  return (kind && kind !== 'cafe' ? kind + ':' : '') + key_(district, name);
 }
 
 function feedback_(body, device) {
   var type = body.type;
-  if (['cafe', 'idea', 'hi'].indexOf(type) === -1) return { ok: false, error: 'Unknown note type.' };
+  // cafe/food/bar/dessert = a suggestion; closed = "this place has closed"; idea = idea or bug; hi = hello.
+  if (['cafe', 'food', 'bar', 'dessert', 'closed', 'idea', 'hi'].indexOf(type) === -1) return { ok: false, error: 'Unknown note type.' };
   var cafe = clean_(body.cafe, 80);
   var message = clean_(body.message, 600);
-  if (type === 'cafe' && !cafe) return { ok: false, error: 'Add the café’s name so Putri can find it.' };
-  if (type !== 'cafe' && !message) return { ok: false, error: 'Write a message first.' };
-  if (tooFast_('note:' + device, 60)) return { ok: false, error: 'Thanks! Please wait a minute before sending another note.' };
+  var named = KIND_TABS[type] || type === 'closed';
+  if (named && !cafe) return { ok: false, error: 'Add the name so Putri can find it.' };
+  if (!named && !message) return { ok: false, error: 'Write a message first.' };
+  if (tooFast_('note:' + device, type === 'closed' ? 10 : 60)) return { ok: false, error: 'Thanks! Please wait a minute before sending another note.' };
 
   var district = clean_(body.district, 80);
   var fb = feedbackSheet_();
-  fb.appendRow([new Date(), safe_(device), type, safe_(cafe), safe_(district), safe_(message), type === 'cafe' ? 'todo' : '', '', type === 'cafe' ? 'no' : '']);
+  var suggestion = !!KIND_TABS[type];
+  fb.appendRow([new Date(), safe_(device), type, safe_(cafe), safe_(district), safe_(message), suggestion || type === 'closed' ? 'todo' : '', '', suggestion ? 'no' : '']);
 
   if (NOTIFY_NOTES) {
-    var label = { cafe: 'café suggestion', idea: 'idea or bug report', hi: 'hello' }[type];
+    var label = type === 'closed' ? 'report that a place has closed' : suggestion ? KIND_WORD[type] + ' suggestion' : { idea: 'idea or bug report', hi: 'hello' }[type];
     var lines = [];
-    if (cafe) lines.push('Café: ' + cafe + (district ? ' (' + district + ')' : ''));
-    if (message) lines.push((type === 'cafe' ? 'Why: ' : '') + '“' + message + '”');
-    if (type === 'cafe') lines.push('', 'To show it on the to-try list, set Approved to "yes" in the Feedback tab.');
+    if (cafe) lines.push((type === 'closed' ? 'Place: ' : 'Name: ') + cafe + (district ? ' (' + district + ')' : ''));
+    if (message) lines.push((suggestion ? 'Why: ' : '') + '“' + message + '”');
+    if (type === 'cafe') lines.push('', 'To show it on Bean There’s to-try list, set Approved to "yes" in the Feedback tab.');
+    if (type === 'closed') lines.push('', 'If it really has closed, add "closed" to its Tags in the app tab and it disappears from the apps. (The monthly check may also catch it.)');
     lines.push('', 'Open the Feedback tab: ' + SpreadsheetApp.getActive().getUrl() + '#gid=' + fb.getSheetId());
-    notify_('Bean There: new ' + label + (cafe ? ' (' + cafe + ')' : ''), lines.join('\n'));
+    notify_((type === 'cafe' ? 'Bean There' : 'Out & About') + ': new ' + label + (cafe ? ' (' + cafe + ')' : ''), lines.join('\n'));
   }
   return { ok: true };
 }
@@ -752,7 +806,7 @@ function summary_() {
 function voteTally_() {
   var rows = rows_('Votes');
   var latest = {};
-  rows.forEach(function (r) { latest[r[1] + '|' + key_(r[2], r[3])] = { key: key_(r[2], r[3]), verdict: r[4] }; });
+  rows.forEach(function (r) { var k = voteKey_(String(r[6] || ''), r[2], r[3]); latest[r[1] + '|' + k] = { key: k, verdict: r[4] }; });
   var tally = {};
   Object.keys(latest).forEach(function (k) {
     var v = latest[k];
@@ -767,11 +821,11 @@ function voteTally_() {
 function recentVotes_(limit) {
   var rows = rows_('Votes'), out = [], seen = {};
   for (var i = rows.length - 1; i >= 0 && out.length < limit; i--) {
-    var r = rows[i], k = r[1] + '|' + key_(r[2], r[3]);
+    var r = rows[i], k = r[1] + '|' + voteKey_(String(r[6] || ''), r[2], r[3]);
     if (seen[k]) continue; // only each phone's latest vote per café
     seen[k] = 1;
     if (r[4] !== 'agree' && r[4] !== 'disagree') continue;
-    out.push({ district: String(r[2]), cafe: String(r[3]), verdict: r[4], time: new Date(r[0]).getTime() });
+    out.push({ district: String(r[2]), cafe: String(r[3]), verdict: r[4], time: new Date(r[0]).getTime(), kind: String(r[6] || '') || 'cafe' });
   }
   return out;
 }
@@ -799,9 +853,11 @@ function suggestions_() {
 
 // ---------- Helpers ----------
 
-function cafeExists_(district, cafe) {
-  var app = SpreadsheetApp.getActive().getSheetByName('APP');
-  if (!app) return true;
+function cafeExists_(district, cafe) { return placeExists_('cafe', district, cafe); }
+
+function placeExists_(kind, district, cafe) {
+  var app = sheetByName_(SpreadsheetApp.getActive(), KIND_TABS[kind] || 'APP');
+  if (!app) return true; // tab not set up yet (e.g. bars still come from the app's own copy)
   var values = app.getDataRange().getValues();
   var head = values[0].map(function (h) { return String(h).toLowerCase().replace(/[^a-z]/g, ''); });
   var d = head.indexOf('district'), n = head.indexOf('name');
