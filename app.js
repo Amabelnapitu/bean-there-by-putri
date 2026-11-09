@@ -70,7 +70,7 @@
 
   // ---------- State ----------
 
-  var cafes = [], open = [], districts = [];
+  var cafes = [], open = [], districts = [], closedCafes = [];
   var summary = { votes: {}, suggestions: [], recent: [], loaded: false, failed: false };
   var S = {
     profile: load("bt-profile", null), myVotes: load("bt-votes", {}), myUps: load("bt-ups", {}), commented: {},
@@ -831,7 +831,10 @@
     if (h.indexOf("c/") === 0) {
       var parts = h.slice(2).split("/"), cd = districtFromSlug(parts[0]);
       var cafe = cd && cafes.filter(function (x) { return x.district === cd && slug(x.name) === parts[1]; })[0];
-      return cafe ? { name: "cafe", c: cafe } : { name: "map" };
+      if (cafe) return { name: "cafe", c: cafe };
+      // An old link to a café that has since closed: show its district (or the map) and say so.
+      var gone = closedCafes.filter(function (x) { return slug(x.district) === parts[0] && slug(x.name) === parts[1]; })[0];
+      return { name: cd ? "district" : "map", d: cd, gone: gone ? gone.name : "" };
     }
     if (["map", "match", "results", "putri", "crawl", "votes", "note", "saved"].indexOf(h) !== -1) return { name: h };
     if (h.indexOf("saved/") === 0) return { name: "saved", data: h.slice(6) };
@@ -858,6 +861,7 @@
     else if (r.name === "saved") { html = viewSaved(r.data); title = "My list · " + title; navKey = ""; }
     else if (r.name === "note") { html = viewNote(); title = "Send Putri a note · " + title; navKey = "putri"; }
     document.title = title;
+    if (r.gone) setTimeout(function () { toast(r.gone + " has closed, so it’s no longer on Bean There."); }, 50);
     app.innerHTML = html;
     var chrome = r.name !== "landing" && !(r.name === "match" && S.brewing);
     var nav = chrome && r.name !== "match";
@@ -1090,8 +1094,12 @@
   document.getElementById("share-btn").before(savedLink);
 
   loadCafes().then(function (list) {
-    cafes = list;
-    open = cafes.filter(function (c) { return !c.closed; });
+    // Closed and temporarily closed cafés are left out of the app entirely.
+    closedCafes = list.filter(function (c) { return c.closed; });
+    cafes = list.filter(function (c) { return !c.closed; });
+    open = cafes;
+    var keep = S.saved.filter(function (k) { return !closedCafes.some(function (c) { return vkey(c) === k; }); });
+    var droppedSaved = S.saved.length - keep.length;
     var seen = {};
     districts = [];
     ISLAND_LINE.concat(TW_LINE).forEach(function (d) { if (!seen[d] && cafes.some(function (c) { return c.district === d; })) { seen[d] = 1; districts.push(d); } });
@@ -1100,8 +1108,10 @@
     var returning = load("bt-visited", false);
     save("bt-visited", true);
     if (returning && !location.hash) history.replaceState(null, "", "#map");
+    if (droppedSaved) { S.saved = keep; save("bt-saved", keep); }
     route();
     refreshSummary();
+    if (droppedSaved) toast(droppedSaved === 1 ? "A café on your list has closed, so it was removed." : droppedSaved + " cafés on your list have closed, so they were removed.");
     if (!navigator.onLine) toast("You’re offline. Showing the café list saved on this phone.");
   }).catch(function (err) {
     console.error(err);

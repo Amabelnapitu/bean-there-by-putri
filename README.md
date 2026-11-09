@@ -35,7 +35,9 @@ One row per café:
 | Added | Date the café was added (filled in automatically by the sync for new cafés). Drives "New in October" on Putri's Palate and the New badge for 31 days | 2026-10-11 |
 | Lat, Lng | Optional. Fill it automatically with the sheet menu **Bean There → Fill in café locations**, or in Google Maps long-press the café and copy the numbers. With these, the crawl picks the shortest walking order and shows distances | 22.2866, 114.1500 |
 
-Taste Match uses Rating, Drink, Taste and the `cheap`/`pricey` tags. Closed cafés never show as a top pick.
+Taste Match uses Rating, Drink, Taste and the `cheap`/`pricey` tags.
+
+Cafés tagged `closed` or `temp-closed` disappear from the app completely: lists, search, the map, Putri's Palate, the crawl and saved lists. An old link to one opens its district with a note that it has closed, and it's quietly removed from anyone's saved list. Remove the tag and it comes back.
 
 New districts appear automatically. Districts on the Island line or Tsuen Wan line become
 stations in the right order (see `ISLAND_LINE` and `TW_LINE` in `app.js`); anything else
@@ -61,7 +63,7 @@ A hidden `_sync` tab remembers what the Cafe tab looked like last time; don't ed
 
 ### Closed places
 
-Tag a place `closed` (or `temp-closed` while it's shut for a while) and it drops out of every top pick and recommendation.
+Tag a place `closed` (or `temp-closed` while it's shut for a while) and it disappears from the app completely.
 
 **Monthly closed-place check.** Once a month the script looks up every place in the APP and FOOD tabs (and BAR and DESSERT once they exist) on Google Maps and reads whether it's open, temporarily closed or permanently closed. It then:
 
