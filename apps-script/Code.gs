@@ -446,16 +446,33 @@ function rerankAll() {
   alert_(msgs.join('\n\n'));
 }
 
-// ---------- Monthly check for closed places ----------
+// ---------- Monthly check for closed places (and branches) ----------
 //
-// Looks up every place in the app tabs on Google Maps (Places API) and reads its business status.
-//   • Permanently closed → adds the "closed" tag, removes its rank, highlights the row.
-//   • Temporarily closed → adds "temp-closed" (removed again automatically when it reopens).
-// The apps hide both tags from every recommendation. You get an email with what changed.
+// Looks up every place in the app tabs on Google Maps (Places API), finds all of its branches in
+// Hong Kong, and reads whether each one is open.
+//   • Every branch permanently closed → adds the "closed" tag, removes its rank, highlights the row.
+//   • No branch open, at least one temporarily closed → adds "temp-closed" (removed when one reopens).
+//   • Some branches closed but others open → stays on the apps; the email mentions it.
+//   • A place this check tagged "closed" earlier that now has an open branch → the tag is removed.
+// Every branch it finds is written to a BRANCHES tab (the apps use it for "Near me" and branch lists).
+// Put "yes" in a branch's Hide column if Google matched something that isn't really a branch.
+// The apps hide closed and temp-closed places everywhere. You get an email with what changed.
 // Needs a Places API key (see README); it's kept in the script's settings, not in this code.
 
 var CHECK_TABS = ['APP', 'FOOD', 'BAR', 'DESSERT'];
+var TAB_KIND = { APP: 'cafe', FOOD: 'food', BAR: 'bar', DESSERT: 'dessert' };
 var CLOSED_BG = '#F9D9D9';
+var AUTO_CLOSED_NOTE = 'Google Maps lists every branch as permanently closed';
+var OLD_AUTO_CLOSED_NOTE = 'Google Maps lists this as permanently closed';
+var BRANCH_HEADERS = ['Kind', 'District', 'Name', 'Branch', 'Address', 'Lat, Lng', 'Status', 'Putri visited', 'Hide', 'Place ID'];
+// Google place types that fit each kind of place, so a same-named shop of another kind isn't counted as a branch.
+var KIND_TYPES = {
+  cafe: /cafe|coffee|bakery|tea|dessert|breakfast|brunch|food|restaurant|store/,
+  food: /restaurant|food|meal|cafe|diner|bakery|bar_and_grill|deli/,
+  bar: /bar|night_club|pub|lounge|wine|restaurant|food/,
+  dessert: /dessert|ice_cream|bakery|cafe|confection|food|restaurant|store|tea/
+};
+
 
 function setUpClosedCheck() {
   var ui = SpreadsheetApp.getUi(), props = PropertiesService.getScriptProperties();
@@ -486,12 +503,13 @@ function checkClosedPlaces() {
   var key = PropertiesService.getScriptProperties().getProperty('PLACES_API_KEY');
   if (!key) { alert_('No Places API key yet. Use Bean There → Set up monthly closed-place check first.'); return; }
   var ss = SpreadsheetApp.getActive(), today = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'd MMM yyyy');
-  var cache = placeCache_(ss), closed = [], temp = [], reopened = [], unsure = [], ranks = [], checked = 0;
+  var hidden = hiddenBranches_(ss), branchRows = [], searched = {};
+  var closed = [], temp = [], reopened = [], partly = [], unsure = [], ranks = [], checked = 0;
 
   for (var s = 0; s < CHECK_TABS.length; s++) {
-    var sh = sheetByName_(ss, CHECK_TABS[s]);
+    var tab = CHECK_TABS[s], sh = sheetByName_(ss, tab);
     if (!sh) continue;
-    var tab = CHECK_TABS[s], values = sh.getDataRange().getValues();
+    var kind = TAB_KIND[tab], values = sh.getDataRange().getValues(), notes = sh.getDataRange().getNotes();
     var head = values[0].map(function (h) { return String(h).toLowerCase().replace(/[^a-z]/g, ''); });
     var D = head.indexOf('district'), N = head.indexOf('name'), T = head.indexOf('tags'), L = head.indexOf('latlng');
     if (D === -1 || N === -1 || T === -1) continue;
@@ -499,18 +517,24 @@ function checkClosedPlaces() {
     var todo = [];
     for (var i = 1; i < values.length; i++) {
       var name = String(values[i][N]).trim(), district = String(values[i][D]).trim();
+      if (!name) continue;
       var tags = String(values[i][T]).split(';').map(function (x) { return x.trim(); }).filter(String);
-      if (!name || tags.indexOf('closed') !== -1) continue; // already closed: nothing to check
+      var note = String(notes[i][N] || '');
+      var autoClosed = note.indexOf(AUTO_CLOSED_NOTE) === 0 || note.indexOf(OLD_AUTO_CLOSED_NOTE) === 0;
+      if (tags.indexOf('closed') !== -1 && !autoClosed) continue; // you tagged it closed yourself: leave it
       var ll = L === -1 ? null : /(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/.exec(String(values[i][L]));
-      todo.push({ row: i + 1, name: name, district: district, tags: tags, ll: ll ? [Number(ll[1]), Number(ll[2])] : null, id: cache.ids[tab + '|' + district + '|' + name] });
+      todo.push({ row: i + 1, name: name, district: district, tags: tags, autoClosed: autoClosed, ll: ll ? [Number(ll[1]), Number(ll[2])] : null });
     }
 
-    var rerank = {};
-    for (var b = 0; b < todo.length; b += 20) {
-      var batch = todo.slice(b, b + 20);
-      var replies = UrlFetchApp.fetchAll(batch.map(function (p) { return placeRequest_(p, key); }));
+    // One search per name finds every branch (two reviewed branches of the same place share it).
+    var names = {};
+    todo.forEach(function (p) { if (!searched[kind + '|' + p.name.toLowerCase()]) names[p.name.toLowerCase()] = p.name; });
+    var list = Object.keys(names);
+    for (var b = 0; b < list.length; b += 20) {
+      var batch = list.slice(b, b + 20);
+      var replies = UrlFetchApp.fetchAll(batch.map(function (n) { return branchSearch_(names[n], key); }));
       for (var j = 0; j < batch.length; j++) {
-        var p = batch[j], code = replies[j].getResponseCode(), body = {};
+        var code = replies[j].getResponseCode(), body = {};
         try { body = JSON.parse(replies[j].getContentText()); } catch (err) {}
         if (code === 403 || code === 401 || (code === 400 && /API key/i.test(JSON.stringify(body)))) {
           var why = body.error && body.error.message ? body.error.message : 'HTTP ' + code;
@@ -518,79 +542,137 @@ function checkClosedPlaces() {
           alert_('Google refused the Places API key:\n\n' + why + '\n\nCheck the README section "Monthly closed-place check".');
           return;
         }
-        var place = p.id ? body : (body.places && body.places[0]);
-        var label = p.name + ' (' + p.district + ', ' + tab + ')';
-        if (code !== 200 || !place || !place.businessStatus) {
-          if (p.id && code === 404) delete cache.ids[tab + '|' + p.district + '|' + p.name];
-          unsure.push(label); continue;
-        }
-        var gName = place.displayName && place.displayName.text || '';
-        if (!p.id && nameScore_(p.name, gName) < 0.6) { unsure.push(label + ': Google’s closest match was “' + gName + '”'); continue; }
-        cache.ids[tab + '|' + p.district + '|' + p.name] = place.id;
-        checked++;
-        var status = place.businessStatus, hasTemp = p.tags.indexOf('temp-closed') !== -1, nameCell = sh.getRange(p.row, N + 1);
-        if (status === 'CLOSED_PERMANENTLY') {
-          setTags_(sh, p.row, T, p.tags.filter(function (x) { return x !== 'temp-closed'; }).concat('closed'));
-          sh.getRange(p.row, 1, 1, values[0].length).setBackground(CLOSED_BG);
-          nameCell.setNote('Google Maps lists this as permanently closed (checked ' + today + '). If that’s wrong, remove “closed” from its Tags and clear the colour.');
-          closed.push(label); rerank[p.district] = true;
-        } else if (status === 'CLOSED_TEMPORARILY' && !hasTemp) {
-          setTags_(sh, p.row, T, p.tags.concat('temp-closed'));
-          sh.getRange(p.row, 1, 1, values[0].length).setBackground(CLOSED_BG);
-          nameCell.setNote('Google Maps lists this as temporarily closed (checked ' + today + '). The tag is removed automatically when it reopens.');
-          temp.push(label); rerank[p.district] = true;
-        } else if (status === 'OPERATIONAL' && hasTemp) {
-          setTags_(sh, p.row, T, p.tags.filter(function (x) { return x !== 'temp-closed'; }));
-          sh.getRange(p.row, 1, 1, values[0].length).setBackground(null);
-          nameCell.setNote('Reopened: Google Maps lists this as open again (checked ' + today + ').');
-          reopened.push(label); rerank[p.district] = true;
-        }
+        var wanted = names[batch[j]];
+        searched[kind + '|' + batch[j]] = code !== 200 ? null : (body.places || []).filter(function (pl) {
+          var g = pl.displayName && pl.displayName.text || '';
+          return isBranchOf_(wanted, g) && KIND_TYPES[kind].test((pl.types || []).join(' ') || 'food') && !hidden[pl.id];
+        });
       }
     }
+
+    var rerank = {};
+    todo.forEach(function (p) {
+      var label = p.name + ' (' + p.district + ', ' + tab + ')', branches = searched[kind + '|' + p.name.toLowerCase()];
+      if (!branches || !branches.length) { if (branches === null) unsure.push(label); else unsure.push(label + ': no branch found on Google Maps'); return; }
+      checked++;
+      var visited = nearestBranch_(branches, p.ll);
+      branches.forEach(function (pl) {
+        var loc = pl.location ? pl.location.latitude.toFixed(5) + ', ' + pl.location.longitude.toFixed(5) : '';
+        branchRows.push([kind, p.district, p.name, pl.displayName.text, pl.formattedAddress || '', loc, statusWord_(pl.businessStatus), pl === visited ? 'yes' : '', '', pl.id]);
+      });
+      var open = branches.filter(function (pl) { return pl.businessStatus === 'OPERATIONAL'; }).length;
+      var tempN = branches.filter(function (pl) { return pl.businessStatus === 'CLOSED_TEMPORARILY'; }).length;
+      var hasTemp = p.tags.indexOf('temp-closed') !== -1, hasClosed = p.tags.indexOf('closed') !== -1, nameCell = sh.getRange(p.row, N + 1);
+      var width = values[0].length;
+      if (!open && !tempN) {
+        if (!hasClosed) {
+          setTags_(sh, p.row, T, p.tags.filter(function (x) { return x !== 'temp-closed'; }).concat('closed'));
+          sh.getRange(p.row, 1, 1, width).setBackground(CLOSED_BG);
+          nameCell.setNote(AUTO_CLOSED_NOTE + ' (checked ' + today + '). If that’s wrong, remove “closed” from its Tags and clear the colour.');
+          closed.push(label); rerank[p.district] = true;
+        }
+      } else if (!open) {
+        if (!hasTemp || hasClosed) {
+          setTags_(sh, p.row, T, p.tags.filter(function (x) { return x !== 'closed'; }).concat('temp-closed'));
+          sh.getRange(p.row, 1, 1, width).setBackground(CLOSED_BG);
+          nameCell.setNote('Google Maps lists it as temporarily closed (checked ' + today + '). The tag is removed automatically when a branch reopens.');
+          temp.push(label); rerank[p.district] = true;
+        }
+      } else {
+        if (hasTemp || (hasClosed && p.autoClosed)) {
+          setTags_(sh, p.row, T, p.tags.filter(function (x) { return x !== 'temp-closed' && x !== 'closed'; }));
+          sh.getRange(p.row, 1, 1, width).setBackground(null);
+          nameCell.setNote('Back on the apps: ' + plural_(open, 'branch', 'branches') + ' open on Google Maps (checked ' + today + ').');
+          reopened.push(label + ' (' + plural_(open, 'branch', 'branches') + ' open)'); rerank[p.district] = true;
+        }
+        if (visited && visited.businessStatus !== 'OPERATIONAL') partly.push(label + ': the branch you visited (' + (visited.formattedAddress || visited.displayName.text) + ') looks closed, but ' + plural_(open, 'other branch is', 'other branches are') + ' open');
+      }
+    });
     if (Object.keys(rerank).length) ranks = ranks.concat(autoRank_(sh, rerank).map(function (c) { return tab + ' · ' + c; }));
   }
-  savePlaceCache_(cache);
+  writeBranches_(ss, branchRows, hidden);
 
-  var lines = ['Checked ' + checked + ' places on Google Maps (' + today + ').'];
-  if (closed.length) lines.push('Permanently closed (tagged “closed”, hidden from recommendations):\n• ' + closed.join('\n• '));
+  var lines = ['Checked ' + checked + ' places and all their branches on Google Maps (' + today + ').'];
+  if (closed.length) lines.push('Every branch closed (tagged “closed”, hidden from the apps):\n• ' + closed.join('\n• '));
   if (temp.length) lines.push('Temporarily closed (tagged “temp-closed”):\n• ' + temp.join('\n• '));
-  if (reopened.length) lines.push('Open again (“temp-closed” removed):\n• ' + reopened.join('\n• '));
+  if (reopened.length) lines.push('Back on the apps (a branch is open):\n• ' + reopened.join('\n• '));
+  if (partly.length) lines.push('Still on the apps, but worth knowing:\n• ' + partly.join('\n• '));
   if (ranks.length) lines.push('Ranks updated:\n• ' + ranks.join('\n• '));
   if (!closed.length && !temp.length && !reopened.length) lines.push('Nothing has closed. 🎉');
-  if (unsure.length) lines.push('Couldn’t check these (no clear match on Google Maps). Fill in their Lat, Lng or check them yourself:\n• ' + unsure.join('\n• '));
+  if (unsure.length) lines.push('Couldn’t check these (no clear match on Google Maps):\n• ' + unsure.join('\n• '));
+  lines.push('All branches found are in the BRANCHES tab.');
   var msg = lines.join('\n\n');
   notify_('Out & About: monthly closed-place check', msg + '\n\nThe sites pick up changes within about 5 minutes.');
   alert_(msg);
 }
 
-function placeRequest_(p, key) {
-  if (p.id) {
-    return { url: 'https://places.googleapis.com/v1/places/' + encodeURIComponent(p.id), method: 'get', muteHttpExceptions: true,
-      headers: { 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'id,displayName,businessStatus' } };
-  }
-  var body = { textQuery: p.name + ', ' + p.district + ', Hong Kong', regionCode: 'HK', pageSize: 1 };
-  if (p.ll) body.locationBias = { circle: { center: { latitude: p.ll[0], longitude: p.ll[1] }, radius: 500 } };
+function branchSearch_(name, key) {
   return { url: 'https://places.googleapis.com/v1/places:searchText', method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    payload: JSON.stringify(body), headers: { 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'places.id,places.displayName,places.businessStatus' } };
+    payload: JSON.stringify({ textQuery: name + ', Hong Kong', regionCode: 'HK', pageSize: 20,
+      locationRestriction: { rectangle: { low: { latitude: 22.15, longitude: 113.82 }, high: { latitude: 22.57, longitude: 114.45 } } } }),
+    headers: { 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'places.id,places.displayName,places.businessStatus,places.location,places.formattedAddress,places.types' } };
 }
+
+// "NOC Coffee Co. (Sai Ying Pun)" is a branch of "NOC"; "Station Bistro" isn't a branch of "The Station".
+function isBranchOf_(name, gName) {
+  var x = normName_(name), g = normName_(String(gName).replace(/\([^)]*\)/g, ' ').replace(/[-–|@·].*$/, ' '));
+  if (!x || !g) return false;
+  if (x === g) return true;
+  if (x.length >= 2 && g.indexOf(x) === 0) {
+    // Whatever follows the name must be a branch label: an area ("Kennedy Town") or a word like "Bar".
+    var rest = g.slice(x.length), changed = true;
+    while (rest && changed) {
+      changed = false;
+      for (var i = 0; i < BRANCH_WORDS.length; i++) if (rest.indexOf(BRANCH_WORDS[i]) === 0) { rest = rest.slice(BRANCH_WORDS[i].length); changed = true; break; }
+    }
+    if (!rest) return true;
+  }
+  return 1 - levenshtein_(x, g) / Math.max(x.length, g.length) >= 0.85;
+}
+
+var BRANCH_WORDS = ['hongkong', 'hk', 'kennedytown', 'saiyingpun', 'sheungwan', 'central', 'soho', 'admiralty', 'wanchai', 'causewaybay', 'tinhau', 'fortresshill', 'northpoint', 'quarrybay', 'taikoo', 'taikooshing', 'saiwanho', 'shaukeiwan', 'chaiwan', 'tsimshatsui', 'tst', 'jordan', 'yaumatei', 'mongkok', 'princeedward', 'shamshuipo', 'kowloon', 'kowloonbay', 'kwuntong', 'shatin', 'taipo', 'repulsebay', 'stanley', 'aberdeen', 'ifc', 'pacificplace', 'timessquare', 'harbourcity', 'elements', 'leegarden', 'landmark', 'midlevels', 'hku', 'island', 'east', 'west', 'branch', 'shop', 'store', 'express', 'kiosk', 'bar', 'club', 'lounge', 'espresso', 'kitchen', 'restaurant', 'pizzeria', 'pizza', 'bakery', 'dessert', 'by', 'indian', 'thai', 'italian', 'vietnamese', 'japanese', 'korean', 'chinese', 'mexican', 'filipino', 'cuisine', 'noodles', 'noodle', 'ramen', 'eatery', 'grill', 'taqueria', 'cantina', 'cocktailbar', 'wine'];
+
+function nearestBranch_(branches, ll) {
+  if (!ll) return branches.length === 1 ? branches[0] : null;
+  var best = null, bestKm = 0.6; // within ~600 m of the place's own Lat, Lng
+  branches.forEach(function (pl) {
+    if (!pl.location) return;
+    var dx = (pl.location.longitude - ll[1]) * Math.cos(ll[0] * Math.PI / 180), dy = pl.location.latitude - ll[0], k = Math.sqrt(dx * dx + dy * dy) * 111.2;
+    if (k < bestKm) { bestKm = k; best = pl; }
+  });
+  return best;
+}
+
+function statusWord_(s) { return { OPERATIONAL: 'open', CLOSED_TEMPORARILY: 'temporarily closed', CLOSED_PERMANENTLY: 'closed' }[s] || 'unknown'; }
+function plural_(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
 
 function setTags_(sh, row, col, tags) {
   sh.getRange(row, col + 1).setValue(tags.filter(function (x, i) { return tags.indexOf(x) === i; }).join(';'));
 }
 
-// Remembers each place's Google ID in a hidden "_places" tab, so later checks are exact and cheaper.
-function placeCache_(ss) {
-  var sh = sheetByName_(ss, '_places'), ids = {};
-  if (sh && sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues().forEach(function (r) { if (r[0]) ids[r[0]] = r[1]; });
-  return { sheet: sh, ids: ids };
+// Branches you marked Hide = yes stay hidden in later checks.
+function hiddenBranches_(ss) {
+  var sh = sheetByName_(ss, 'BRANCHES'), out = {};
+  if (!sh || sh.getLastRow() < 2) return out;
+  var values = sh.getDataRange().getValues(), head = values[0].map(function (h) { return String(h).toLowerCase().replace(/[^a-z]/g, ''); });
+  var H = head.indexOf('hide'), P = head.indexOf('placeid');
+  if (H === -1 || P === -1) return out;
+  values.slice(1).forEach(function (r) { if (/^(y|yes|x|true|✓)$/i.test(String(r[H]).trim()) && r[P]) out[r[P]] = true; });
+  return out;
 }
 
-function savePlaceCache_(cache) {
-  var sh = cache.sheet || SpreadsheetApp.getActive().insertSheet('_places').hideSheet();
-  var rows = [['Key', 'Google Place ID']];
-  Object.keys(cache.ids).forEach(function (k) { rows.push([k, cache.ids[k]]); });
+function writeBranches_(ss, rows, hidden) {
+  var sh = sheetByName_(ss, 'BRANCHES') || ss.insertSheet('BRANCHES');
+  var keep = Object.keys(hidden).map(function (id) { return id; });
+  var old = sh.getLastRow() > 1 ? sh.getDataRange().getValues().slice(1) : [];
+  // Keep the rows you hid, so the "yes" isn't lost.
+  old.forEach(function (r) { if (hidden[r[9]]) rows.push(r.slice(0, 10)); });
   sh.clear();
-  sh.getRange(1, 1, rows.length, 2).setNumberFormat('@').setValues(rows);
+  var out = [BRANCH_HEADERS].concat(rows);
+  sh.getRange(1, 1, out.length, BRANCH_HEADERS.length).setValues(out.map(function (r) { return r.map(function (v) { return typeof v === 'string' ? safe_(v) : v; }); }));
+  sh.getRange(1, 1, 1, BRANCH_HEADERS.length).setFontWeight('bold');
+  sh.setFrozenRows(1);
+  return keep.length;
 }
 
 // One entry per café. Handles merged cells and cafés that span several rows.

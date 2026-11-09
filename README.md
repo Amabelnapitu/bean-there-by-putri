@@ -69,11 +69,14 @@ A hidden `_sync` tab remembers what the Cafe tab looked like last time; don't ed
 
 Tag a place `closed` (or `temp-closed` while it's shut for a while) and it disappears from the app completely.
 
-**Monthly closed-place check.** Once a month the script looks up every place in the APP and FOOD tabs (and BAR and DESSERT once they exist) on Google Maps and reads whether it's open, temporarily closed or permanently closed. It then:
+**Monthly closed-place check.** Once a month the script looks up every place in the APP and FOOD tabs (and BAR and DESSERT once they exist) on Google Maps, finds **all of its branches** in Hong Kong, and checks whether each one is open. A place only counts as closed when **every** branch is closed:
 
-- tags permanently closed places `closed`, highlights the row in pink and removes their rank;
-- tags temporarily closed places `temp-closed`, and removes the tag by itself when they reopen;
-- emails you a summary, including any places it couldn't find a clear match for.
+- every branch permanently closed → tagged `closed`, row highlighted pink, rank removed;
+- no branch open but at least one temporarily closed → tagged `temp-closed` (removed by itself when one reopens);
+- some branches closed but others open → stays on the apps, and the email tells you if the branch you visited is one of the closed ones;
+- a place the check tagged `closed` earlier that now has an open branch → the tag is removed. (Places you tagged `closed` yourself are never touched.)
+
+Every branch it finds goes into a **BRANCHES** tab (Kind, District, Name, Branch, Address, Lat, Lng, Status, Putri visited, Hide, Place ID). If Google matched something that isn't really a branch, type `yes` in its **Hide** column and later checks ignore it. You get an email summary each time.
 
 It needs a Google Places API key. Setting one up once:
 
@@ -84,7 +87,7 @@ It needs a Google Places API key. Setting one up once:
 5. Optional safety cap: **APIs & Services → Places API (New) → Quotas** and set the daily request limit to 500.
 6. In the sheet: **Bean There → Set up monthly closed-place check**, paste the key, and allow the new permissions Google asks for. It runs once straight away, then on the 1st of every month.
 
-The key is stored in the script's own settings (not in the code or the sheet). **Check for closed places now** runs it any time; **Turn off monthly closed-place check** stops the schedule. Place IDs are remembered in a hidden `_places` tab so later checks are exact; don't edit or delete it.
+The key is stored in the script's own settings (not in the code or the sheet). **Check for closed places now** runs it any time; **Turn off monthly closed-place check** stops the schedule. (An older version kept a hidden `_places` tab; it's no longer used and can be deleted.)
 
 ## Setup
 
