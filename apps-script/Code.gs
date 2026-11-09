@@ -169,11 +169,18 @@ var NAME_STOPWORDS = ['the', 'and', 'a', 's', 'co', 'coffee', 'cafe', 'roasters'
 var SYNC_SOURCES = [
   { id: 'cafe', source: 'Cafe', target: 'APP', snapshot: '_sync', what: 'café', fill: function (cur) { return { drink: guessDrink_(cur.o), tags: guessTags_('cafe', cur) }; } },
   { id: 'food', source: 'Restaurant', target: 'FOOD', snapshot: '_sync_food', what: 'restaurant', fill: function (cur) { return { cuisine: guessCuisine_(cur.o), tags: guessTags_('food', cur) }; } },
-  { id: 'bar', source: 'Bar', target: 'BAR', snapshot: '_sync_bar', what: 'bar', fill: function (cur, it) { return { type: barType_(it.type), tags: guessTags_('bar', cur, it.type) }; } },
+  { id: 'bar', source: 'Bar', aliases: ['Bar List', 'Bars', 'Bar & Club', 'Bars & Clubs'], target: 'BAR', snapshot: '_sync_bar', what: 'bar', fill: function (cur, it) { return { type: barType_(it.type), tags: guessTags_('bar', cur, it.type) }; } },
   // The DESSERT tab is created automatically the first time you sync after adding a "Dessert" tab.
-  { id: 'dessert', source: 'Dessert', target: 'DESSERT', snapshot: '_sync_dessert', what: 'dessert spot', create: ['District', 'Name', 'Rank', 'Rating', 'Must Order', 'Price', 'Note', 'Tags', 'Maps Link', 'Lat, Lng', 'Added'], fill: function (cur) { return { tags: guessTags_('dessert', cur) }; } }
+  { id: 'dessert', source: 'Dessert', aliases: ['Desserts', 'Dessert List'], target: 'DESSERT', snapshot: '_sync_dessert', what: 'dessert spot', create: ['District', 'Name', 'Rank', 'Rating', 'Must Order', 'Price', 'Note', 'Tags', 'Maps Link', 'Lat, Lng', 'Added'], fill: function (cur) { return { tags: guessTags_('dessert', cur) }; } }
 ];
-function baselineFor_(id) { return { cafe: SYNC_BASELINE, food: FOOD_BASELINE, bar: BAR_BASELINE }[id] || {}; }
+function baselineFor_(id) { return { cafe: SYNC_BASELINE, food: FOOD_BASELINE, bar: BAR_BASELINE, dessert: DESSERT_BASELINE }[id] || {}; }
+
+// The review tab for a sync source, allowing for renamed tabs (e.g. "Bar List").
+function sourceSheet_(ss, cfg) {
+  var names = [cfg.source].concat(cfg.aliases || []);
+  for (var i = 0; i < names.length; i++) { var sh = sheetByName_(ss, names[i]); if (sh) return sh; }
+  return null;
+}
 
 function barType_(s) {
   s = String(s || '').toLowerCase();
@@ -190,7 +197,7 @@ function syncFromCafe() {
 function onCafeEdit(e) {
   if (e && e.range) {
     var name = e.range.getSheet().getName().trim().toLowerCase();
-    if (!SYNC_SOURCES.some(function (cfg) { return cfg.source.toLowerCase() === name; })) return;
+    if (!SYNC_SOURCES.some(function (cfg) { return [cfg.source].concat(cfg.aliases || []).some(function (n) { return n.toLowerCase() === name; }); })) return;
   }
   syncAll_(true);
 }
@@ -219,7 +226,7 @@ function syncAll_(silent) {
     var ss = SpreadsheetApp.getActive();
     var msgs = SYNC_SOURCES.map(function (cfg) {
       if (!sheetByName_(ss, cfg.target)) {
-        if (cfg.create && sheetByName_(ss, cfg.source)) {
+        if (cfg.create && sourceSheet_(ss, cfg)) {
           var made = ss.insertSheet(cfg.target);
           made.getRange(1, 1, 1, cfg.create.length).setValues([cfg.create]).setFontWeight('bold');
           made.setFrozenRows(1);
@@ -238,7 +245,7 @@ function syncAll_(silent) {
 function syncFromCafe_(silent) { return syncAll_(silent); }
 
 function syncTab_(ss, cfg, silent) {
-  var srcSh = sheetByName_(ss, cfg.source), appSh = sheetByName_(ss, cfg.target);
+  var srcSh = sourceSheet_(ss, cfg), appSh = sheetByName_(ss, cfg.target);
   if (!srcSh || !appSh) return 'Couldn’t find the ' + cfg.source + ' and ' + cfg.target + ' tabs.';
 
   var items = parseCafeRows_(srcSh.getDataRange().getValues());
@@ -272,7 +279,7 @@ function syncTab_(ss, cfg, silent) {
       if (same_(cur[f], prev[f]) || FIELD_COL[f] === -1) return;
       var cell = appSh.getRange(m.app.row, FIELD_COL[f] + 1);
       cell.setValue(f === 'r' && cur.r !== '' && !isNaN(Number(cur.r)) ? Number(cur.r) : cur[f]);
-      if (f === 'v') cell.setBackground('#EFE6FA').setNote('Updated from the ' + cfg.source + ' tab on ' + today + '. This is your original wording; tidy it up if you like.');
+      if (f === 'v') cell.setBackground('#EFE6FA').setNote('Updated from the ' + srcSh.getName().trim() + ' tab on ' + today + '. This is your original wording; tidy it up if you like.');
       what.push(FIELD_NAME[f]);
       if (f === 'r') rerank[m.app.district] = true;
     });
@@ -294,7 +301,7 @@ function syncTab_(ss, cfg, silent) {
     var r = appSh.getLastRow();
     appSh.getRange(r, C.added + 1).setNumberFormat('yyyy-mm-dd');
     appSh.getRange(r, 1, 1, head.length).setBackground('#EFE6FA');
-    appSh.getRange(r, C.name + 1).setNote('New from the ' + cfg.source + ' tab on ' + today + '. ' + ({ cafe: 'Drink, ', food: 'Cuisine, ', bar: 'Type, ' }[cfg.id] || '') + 'Tags and Rank were filled in automatically: check them' + (cfg.id === 'cafe' ? ', and add Taste' : '') + '.');
+    appSh.getRange(r, C.name + 1).setNote('New from the ' + srcSh.getName().trim() + ' tab on ' + today + '. ' + ({ cafe: 'Drink, ', food: 'Cuisine, ', bar: 'Type, ' }[cfg.id] || '') + 'Tags and Rank were filled in automatically: check them' + (cfg.id === 'cafe' ? ', and add Taste' : '') + '.');
     next[it.district + '|' + it.name] = cur;
     rerank[it.district] = true;
     added.push(it.name + ' (' + it.district + ')');
@@ -309,7 +316,7 @@ function syncTab_(ss, cfg, silent) {
   if (changed.length) msg += '\n\nUpdated:\n• ' + changed.join('\n• ');
   if (added.length) msg += '\n\nAdded (highlighted in lilac):\n• ' + added.join('\n• ') + '\n\n' + located;
   if (ranked.length) msg += '\n\nRanks updated (highlighted):\n• ' + ranked.join('\n• ');
-  if (missing.length && !silent) msg += '\n\nIn the ' + cfg.target + ' tab but not found in the ' + cfg.source + ' tab (left as they are):\n• ' + missing.join('\n• ');
+  if (missing.length && !silent) msg += '\n\nIn the ' + cfg.target + ' tab but not found in the ' + srcSh.getName().trim() + ' tab (left as they are):\n• ' + missing.join('\n• ');
   return msg;
 }
 
@@ -812,6 +819,9 @@ var FOOD_BASELINE = {"Kennedy Town|Nom Nom Dumplings":{"r":"4.7","p":"70","o":"S
 
 // What the Bar tab looked like when the BAR tab was built.
 var BAR_BASELINE = {"Central|Gishiki Lounge":{"r":"4.5","p":"120","o":"Hannaya","v":"Nice vibes, good cocktail."},"Central|Maggie Choo":{"r":"4.5","p":"158","o":"All cocktails","v":"Love the cocktail, nice vibes."},"Central|Tell Camilla":{"r":"5","p":"~175","o":"All cocktails","v":"The cocktail delicious, really enjoyed the free shots hehe."},"Central|HCode":{"r":"4","p":"95","o":"White Wine","v":"Okay, it's white wine..."},"Central|Zzura":{"r":"3.7","p":"130","o":"Dry Grape","v":"It's okay, the vibes are cute."},"Central|Barcode":{"r":"4","p":"~150","o":"Mango Sticky Rice, Watermelon Negroni","v":"I like the Mango Sticky Rice the place is super small tho."},"Central|COA":{"r":"","p":"","o":"","v":""},"Central|Club Feather":{"r":"","p":"","o":"Mango Daiquiri","v":""},"Central|Missions":{"r":"","p":"~100","o":"White Wine","v":""},"Central|Grape Vine":{"r":"","p":"","o":"","v":""},"Central|33":{"r":"","p":"","o":"","v":""},"Sai Ying Pun|Ping Pong 129":{"r":"4.5","p":"150","o":"Raspberry G&T","v":"Cute vibes, good drinks."},"Sai Ying Pun|Junels":{"r":"","p":"","o":"Sangria, Jagger Bomb , Aperol Spritz","v":""},"Tsim Sha Tsui|The Library":{"r":"","p":"","o":"","v":""},"Central|Iron Fairies":{"r":"4.7","p":"130 pp","o":"All cocktails","v":"V pretty deco, go on weekdays."},"Central|Penicillin":{"r":"4","p":"125","o":"Wear No Evil","v":"The cocktails wasn't that strong but the flavor is good."},"Central|La Boudoir":{"r":"4","p":"85","o":"Vodka shots","v":"The drink is just a shot like every where else But the vibes are nice, dj pretty good can get too crowded tho."}};
+
+// What the Dessert tab looked like when the DESSERT tab was built.
+var DESSERT_BASELINE = {"Kennedy Town|NOOK":{"r":"4","p":"71","o":"Mango Gelato with bubble waffle","v":"Very good, worth money."},"Kennedy Town|Drool":{"r":"5","p":"58","o":"Matcha Garden, Golden Gem, Choco 3.0","v":"Not too sweet, great froyo, value for money."},"Sai Ying Pun|Edenly Gelato":{"r":"4","p":"58","o":"Hazelnut Gelato","v":"Good gelato! Comes with a cute spoon to bring home."},"Sai Ying Pun|Law of Yogurth":{"r":"5","p":"58","o":"Mix Topping","v":"Best froyo in HK."}};
 
 
 // ---------- Actions ----------
