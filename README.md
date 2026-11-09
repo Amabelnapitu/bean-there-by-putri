@@ -53,9 +53,32 @@ Keep reviewing in the **Cafe** tab as usual, then use the sheet menu **Bean Ther
 - A changed review replaces the APP tab's Note with your new wording, highlighted in lilac so you can tidy it.
 - A new café is added to the APP tab (highlighted) and its location is looked up. Add Rank, Taste and Tags yourself.
 - Rank, Drink, Taste, Tags, Maps Link, Lat, Lng and reworded notes are never overwritten unless you change that café in the Cafe tab.
+- **Rank fills itself in.** When a place is added or its rating changes, that district is re-ranked: Rank 1, 2, 3 go to the highest-rated places rated **4 or more**, and closed places never get a rank. Ties keep the order you already had. Changed ranks are highlighted. Overrule any of them by typing your own; to re-apply the rule everywhere, use **Bean There → Re-rank every district**.
+- **New places get suggested Tags** (and Drink for cafés, Cuisine for restaurants) from your review, order and price, highlighted so you can check them. Taste is still yours to add.
 
 Cafés are matched by district and name, and small typos are fine ("Haflway" still finds "Halfway Coffee").
 A hidden `_sync` tab remembers what the Cafe tab looked like last time; don't edit or delete it.
+
+### Closed places
+
+Tag a place `closed` (or `temp-closed` while it's shut for a while) and it drops out of every top pick and recommendation.
+
+**Monthly closed-place check.** Once a month the script looks up every place in the APP and FOOD tabs (and BAR and DESSERT once they exist) on Google Maps and reads whether it's open, temporarily closed or permanently closed. It then:
+
+- tags permanently closed places `closed`, highlights the row in pink and removes their rank;
+- tags temporarily closed places `temp-closed`, and removes the tag by itself when they reopen;
+- emails you a summary, including any places it couldn't find a clear match for.
+
+It needs a Google Places API key. Setting one up once:
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com), sign in with the account that owns the sheet, and create a project (any name, e.g. "Out and About").
+2. **Billing → Link a billing account** and add a card. Google requires this for Maps APIs; about 170 places once a month stays within Google's free monthly usage, so it should cost nothing. To be safe, set **Billing → Budgets & alerts** to email you at US$1.
+3. **APIs & Services → Library**, search for **Places API (New)** and click **Enable**.
+4. **APIs & Services → Credentials → Create credentials → API key.** Click the new key, under **API restrictions** choose **Restrict key → Places API (New)**, and save.
+5. Optional safety cap: **APIs & Services → Places API (New) → Quotas** and set the daily request limit to 500.
+6. In the sheet: **Bean There → Set up monthly closed-place check**, paste the key, and allow the new permissions Google asks for. It runs once straight away, then on the 1st of every month.
+
+The key is stored in the script's own settings (not in the code or the sheet). **Check for closed places now** runs it any time; **Turn off monthly closed-place check** stops the schedule. Place IDs are remembered in a hidden `_places` tab so later checks are exact; don't edit or delete it.
 
 ## Setup
 

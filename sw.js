@@ -1,5 +1,5 @@
 // Bean There offline support: keeps the app and the latest café list on the phone.
-var CACHE = "bean-there-v1";
+var CACHE = "bean-there-v2";
 var SHELL = ["./", "index.html", "styles.css", "app.js", "config.js", "data/cafes.csv", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", function (e) {

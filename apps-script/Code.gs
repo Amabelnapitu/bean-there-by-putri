@@ -60,6 +60,12 @@ function onOpen() {
     .addItem('Turn off auto-sync', 'turnOffAutoSync')
     .addSeparator()
     .addItem('Fill in locations (Lat, Lng)', 'fillCoordinates')
+    .addItem('Re-rank every district', 'rerankAll')
+    .addSeparator()
+    .addItem('Check for closed places now', 'checkClosedPlaces')
+    .addItem('Set up monthly closed-place check', 'setUpClosedCheck')
+    .addItem('Turn off monthly closed-place check', 'turnOffClosedCheck')
+    .addSeparator()
     .addItem('Send me a test email', 'sendTestEmail')
     .addToUi();
 }
@@ -146,7 +152,10 @@ function alert_(msg) {
 // Lat, Lng and the reworded notes).
 //   • Change a rating, price or order in the Cafe tab → the same café updates in the APP tab.
 //   • Change a review → the APP tab's Note gets your new wording, highlighted so you can tidy it.
-//   • Add a café → it's added to the APP tab (highlighted) and its location is looked up.
+//   • Add a café → it's added to the APP tab (highlighted), its location is looked up, and its
+//     Tags (plus Drink or Cuisine) are suggested from your review, order and price.
+//   • New places and rating changes re-rank that district: Rank 1–3 go to the highest-rated places
+//     rated 4 or more (ties keep the existing order). Closed places never get a rank.
 // It remembers what the Cafe and Restaurant tabs looked like last time in hidden "_sync" and
 // "_sync_food" tabs, so only real changes are copied over.
 
@@ -155,8 +164,8 @@ var NAME_STOPWORDS = ['the', 'and', 'a', 's', 'co', 'coffee', 'cafe', 'roasters'
 
 // Each source tab and the app tab it feeds. `fill` suggests values for a new row's extra columns.
 var SYNC_SOURCES = [
-  { id: 'cafe', source: 'Cafe', target: 'APP', snapshot: '_sync', what: 'café', fill: function (order) { return { drink: guessDrink_(order) }; } },
-  { id: 'food', source: 'Restaurant', target: 'FOOD', snapshot: '_sync_food', what: 'restaurant', fill: function () { return {}; } }
+  { id: 'cafe', source: 'Cafe', target: 'APP', snapshot: '_sync', what: 'café', fill: function (cur) { return { drink: guessDrink_(cur.o), tags: guessTags_('cafe', cur) }; } },
+  { id: 'food', source: 'Restaurant', target: 'FOOD', snapshot: '_sync_food', what: 'restaurant', fill: function (cur) { return { cuisine: guessCuisine_(cur.o), tags: guessTags_('food', cur) }; } }
 ];
 function baselineFor_(id) { return id === 'food' ? FOOD_BASELINE : SYNC_BASELINE; }
 
@@ -233,6 +242,7 @@ function syncTab_(ss, cfg, silent) {
   var next = {}, changed = [], added = [], today = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'd MMM yyyy');
   var FIELD_COL = { r: C.rating, p: C.price, o: C.order, v: C.note };
   var FIELD_NAME = { r: 'rating', p: 'price', o: 'order', v: 'review' };
+  var rerank = {};
 
   pairs.matched.forEach(function (m) {
     var key = m.app.district + '|' + m.app.name, cur = cafeFields_(m.cafe), prev = snap[key];
@@ -245,6 +255,7 @@ function syncTab_(ss, cfg, silent) {
       cell.setValue(f === 'r' && cur.r !== '' && !isNaN(Number(cur.r)) ? Number(cur.r) : cur[f]);
       if (f === 'v') cell.setBackground('#EFE6FA').setNote('Updated from the ' + cfg.source + ' tab on ' + today + '. This is your original wording; tidy it up if you like.');
       what.push(FIELD_NAME[f]);
+      if (f === 'r') rerank[m.app.district] = true;
     });
     if (what.length) changed.push(m.app.name + ' (' + m.app.district + '): ' + what.join(', '));
   });
@@ -257,27 +268,291 @@ function syncTab_(ss, cfg, silent) {
     if (C.order !== -1) row[C.order] = cur.o;
     if (C.price !== -1) row[C.price] = cur.p;
     if (C.note !== -1) row[C.note] = cur.v;
-    var extra = cfg.fill(cur.o);
+    var extra = cfg.fill(cur);
     Object.keys(extra).forEach(function (k) { if (col(k) !== -1) row[col(k)] = extra[k]; });
     row[C.added] = new Date();
     appSh.appendRow(row.map(function (v) { return typeof v === 'string' ? safe_(v) : v; }));
     var r = appSh.getLastRow();
     appSh.getRange(r, C.added + 1).setNumberFormat('yyyy-mm-dd');
     appSh.getRange(r, 1, 1, head.length).setBackground('#EFE6FA');
-    appSh.getRange(r, C.name + 1).setNote('New from the ' + cfg.source + ' tab on ' + today + '. Add Rank' + (cfg.id === 'food' ? ', Cuisine' : ', Taste') + ' and Tags if you like.');
+    appSh.getRange(r, C.name + 1).setNote('New from the ' + cfg.source + ' tab on ' + today + '. ' + (cfg.id === 'food' ? 'Cuisine' : 'Drink') + ', Tags and Rank were filled in automatically: check them' + (cfg.id === 'cafe' ? ', and add Taste' : '') + '.');
     next[it.district + '|' + it.name] = cur;
+    rerank[it.district] = true;
     added.push(it.name + ' (' + it.district + ')');
   });
 
   writeSnapshot_(snapSheet || ss.insertSheet(cfg.snapshot).hideSheet(), next);
   var located = added.length ? fillCoordinates_(cfg.target, cfg.what) : '';
+  var ranked = Object.keys(rerank).length ? autoRank_(appSh, rerank) : [];
 
   var missing = pairs.unusedApp.map(function (a) { return a.name + ' (' + a.district + ')'; });
   var msg = changed.length || added.length ? 'updated.' : 'everything already matches.';
   if (changed.length) msg += '\n\nUpdated:\n• ' + changed.join('\n• ');
   if (added.length) msg += '\n\nAdded (highlighted in lilac):\n• ' + added.join('\n• ') + '\n\n' + located;
+  if (ranked.length) msg += '\n\nRanks updated (highlighted):\n• ' + ranked.join('\n• ');
   if (missing.length && !silent) msg += '\n\nIn the ' + cfg.target + ' tab but not found in the ' + cfg.source + ' tab (left as they are):\n• ' + missing.join('\n• ');
   return msg;
+}
+
+// ---------- Suggested Tags, Cuisine and Rank ----------
+//
+// New places get Tags (and Cuisine for restaurants) guessed from the review, order and price,
+// using the same tag list as the apps. They're highlighted so you can check them.
+
+function guessTags_(kind, cur) {
+  var s = (cur.o + ' ' + cur.v).toLowerCase(), review = String(cur.v).toLowerCase();
+  var price = parseInt(String(cur.p).replace(/[^0-9\/ ~\-]/g, ''), 10);
+  var tags = [];
+  function add(tag, yes) { if (yes && tags.indexOf(tag) === -1) tags.push(tag); }
+  var smallPortion = /portion[^.]*small|small portion|size too small|volume is (so )?(less|small)/.test(review);
+  var smallSpace = /small (space|place|shop|sitting)|(space|place) is [a-z ]*small|too small|tiny|cramp|so small|super small/.test(review.replace(/(portion|size|volume|cup)[^.,]*small/g, ''));
+  var value = /value for money|good value|good for value|super worth|worth (the )?money|good deal|affordable|cheap/.test(review);
+  var pricey = /pric(e)?(y|ier)|expensive|steep/.test(review);
+  var hasPrice = !isNaN(price) && price >= 10;
+  if (kind === 'cafe') {
+    add('cheap', value || (hasPrice && price <= 31));
+    add('pricey', pricey);
+    add('small-space', smallSpace);
+    add('small-portion', smallPortion);
+    add('work-friendly', /work|productiv|laptop/.test(review) && !/not suitable to work|can'?t work|cannot work|too small to work/.test(review));
+    add('cozy', /coz|cosy/.test(review));
+    add('cute', /cute/.test(review));
+    add('takeaway-only', /take ?away only|only take ?away|no (place|space|where) to s(i|ea)t|no sitting/.test(review));
+    add('no-ports', /no (power )?(ports?|sockets?|plugs?|outlets?)/.test(review));
+    add('time-limit', /time limit/.test(review));
+    add('cash-only', /cash only|octopus only|only (accept|take)s? (cash|octopus)/.test(review));
+  } else if (kind === 'food') {
+    add('value', value);
+    add('cheap', hasPrice && price < 70);
+    add('pricey', pricey || (hasPrice && price >= 300));
+    add('lunch-set', /lunch (set|deal)|the set\b|\(set\)/.test(s));
+    add('buffet', /buffet/.test(s));
+    add('big-portion', /huge|big portion|portion (is )?(huge|big)|generous/.test(review));
+    add('small-portion', smallPortion);
+    add('small-space', smallSpace);
+    add('spicy', /spic|heat/.test(review) || /mala|sichuan|szechuan|dried hot ?pot|spicy sour|vindaloo/.test(String(cur.o).toLowerCase()));
+    add('veggie-friendly', /vegan|vegetarian|veggie|paneer|tofu/.test(s));
+    add('late-night', /late[- ]night|drunk|after midnight/.test(s));
+    add('healthy', /healthy/.test(review) || /^(byo |build[- ]your[- ]own )?salad|salad bowl|poke/.test(String(cur.o).toLowerCase()));
+    add('cute', /cute/.test(review));
+    add('group', /group|sharing|to share|with friends/.test(review));
+  }
+  return tags.join(';');
+}
+
+function guessCuisine_(order) {
+  var s = String(order).toLowerCase();
+  // The dish that comes first in the order decides (so "Carbonara, Pizza" is Italian).
+  var rules = [
+    ['Mexican', /taco|burrito|quesad|qused|nacho|birria/], ['Pizza', /pizza|marg(h)?(e|a)rit/], ['Burgers', /burger/], ['Filipino', /chichar|adobo|sisig|lechon/],
+    ['Indian', /tikka|naan|paneer|masala|biryani|samosa|kebab|dosa|thali/], ['Thai', /pad thai|tom yum|thai|papaya salad|basil minced|curry noodle|khao soi/],
+    ['Vietnamese', /pho|bh?an ?h? ?mi|bun |vermicelli/], ['Japanese', /ramen|sushi|udon|donburi|katsu|teriyaki|izakaya/],
+    ['Korean', /kimchi|bibimbap|bulgogi|tteok|yukgaejang|korean/], ['Italian', /pasta|carbonara|rigat|lingu|tagliat|risotto|tiramisu|lasagn/],
+    ['Chinese', /dim sum|siu ?m|wonton|dumpling|fried rice|hot ?pot|noodle|char siu|congee|xiao/], ['Healthy', /salad|poke|bowl/],
+    ['Dessert', /kakigori|parfait|cake|gelato|ice cream|waffle/]
+  ];
+  var best = '', at = Infinity;
+  for (var i = 0; i < rules.length; i++) { var m = rules[i][1].exec(s); if (m && m.index < at) { at = m.index; best = rules[i][0]; } }
+  if (!best && /steak|chicken|fries|salmon|grill|schnitzel/.test(s)) best = 'Western';
+  return best;
+}
+
+// Rank 1–3 per district: highest rating first, rated 4 or more, never closed.
+// Ties keep the order you already had. Only the districts in `districts` (or all, if null) change.
+function autoRank_(sh, districts) {
+  var values = sh.getDataRange().getValues();
+  var head = values[0].map(function (h) { return String(h).toLowerCase().replace(/[^a-z]/g, ''); });
+  var D = head.indexOf('district'), N = head.indexOf('name'), R = head.indexOf('rating'), K = head.indexOf('rank'), T = head.indexOf('tags');
+  if (D === -1 || N === -1 || R === -1 || K === -1) return [];
+  var groups = {};
+  for (var i = 1; i < values.length; i++) {
+    var d = String(values[i][D]).trim(), name = String(values[i][N]).trim();
+    if (!d || !name) continue;
+    if (districts && !districts[d]) continue;
+    (groups[d] = groups[d] || []).push({
+      row: i + 1, name: name, rating: Number(values[i][R]), rank: Number(values[i][K]) || 99,
+      closed: T !== -1 && /(^|;)\s*(temp-)?closed\s*(;|$)/i.test(String(values[i][T]))
+    });
+  }
+  var changes = [], today = Utilities.formatDate(new Date(), SpreadsheetApp.getActive().getSpreadsheetTimeZone(), 'd MMM yyyy');
+  Object.keys(groups).forEach(function (d) {
+    var list = groups[d], order = list.filter(function (p) { return !p.closed && p.rating >= 4; })
+      .sort(function (a, b) { return b.rating - a.rating || a.rank - b.rank || a.row - b.row; }).slice(0, 3);
+    var want = {}; order.forEach(function (p, j) { want[p.row] = j + 1; });
+    var moved = [];
+    list.forEach(function (p) {
+      var now = want[p.row] || '', was = p.rank === 99 ? '' : p.rank;
+      if (now === was) return;
+      sh.getRange(p.row, K + 1).setValue(now).setBackground('#EFE6FA')
+        .setNote('Rank set automatically on ' + today + ' (top 3 in ' + d + ', rated 4+). Change it if you disagree.');
+      moved.push(p.name + (now ? ' → #' + now : ' → no rank'));
+    });
+    if (moved.length) changes.push(d + ': ' + moved.join(', '));
+  });
+  return changes;
+}
+
+function appTabs_() {
+  var ss = SpreadsheetApp.getActive();
+  return CHECK_TABS.map(function (n) { return sheetByName_(ss, n); }).filter(Boolean);
+}
+
+function rerankAll() {
+  var ui = null;
+  try { ui = SpreadsheetApp.getUi(); } catch (err) {}
+  if (ui && ui.alert('Re-rank every district?', 'This sets Rank 1–3 in every app tab to the highest-rated places (rated 4+, not closed). Ties keep your current order. Any rank you set by hand that breaks this rule will change.', ui.ButtonSet.OK_CANCEL) !== ui.Button.OK) return;
+  var msgs = appTabs_().map(function (sh) {
+    var c = autoRank_(sh, null);
+    return sh.getName() + ' tab: ' + (c.length ? 'updated (highlighted).\n• ' + c.join('\n• ') : 'already follows the rule.');
+  });
+  alert_(msgs.join('\n\n'));
+}
+
+// ---------- Monthly check for closed places ----------
+//
+// Looks up every place in the app tabs on Google Maps (Places API) and reads its business status.
+//   • Permanently closed → adds the "closed" tag, removes its rank, highlights the row.
+//   • Temporarily closed → adds "temp-closed" (removed again automatically when it reopens).
+// The apps hide both tags from every recommendation. You get an email with what changed.
+// Needs a Places API key (see README); it's kept in the script's settings, not in this code.
+
+var CHECK_TABS = ['APP', 'FOOD', 'BAR', 'DESSERT'];
+var CLOSED_BG = '#F9D9D9';
+
+function setUpClosedCheck() {
+  var ui = SpreadsheetApp.getUi(), props = PropertiesService.getScriptProperties();
+  var has = !!props.getProperty('PLACES_API_KEY');
+  var res = ui.prompt('Monthly closed-place check', (has ? 'A key is already saved. Paste a new one to replace it, or leave this empty to keep it.\n\n' : '') + 'Paste your Google Places API key (see the README for how to get one):', ui.ButtonSet.OK_CANCEL);
+  if (res.getSelectedButton() !== ui.Button.OK) return;
+  var key = res.getResponseText().trim();
+  if (key) props.setProperty('PLACES_API_KEY', key);
+  else if (!has) { ui.alert('No key entered, so nothing was set up.'); return; }
+  turnOffClosedCheck_();
+  ScriptApp.newTrigger('checkClosedPlaces').timeBased().onMonthDay(1).atHour(10).create();
+  ui.alert('Set up. The check runs on the 1st of every month and emails you what it finds.\n\nIt will now run once so you can see the result.');
+  checkClosedPlaces();
+}
+
+function turnOffClosedCheck() {
+  turnOffClosedCheck_();
+  alert_('The monthly closed-place check is off. You can still run "Check for closed places now" any time.');
+}
+
+function turnOffClosedCheck_() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'checkClosedPlaces') ScriptApp.deleteTrigger(t);
+  });
+}
+
+function checkClosedPlaces() {
+  var key = PropertiesService.getScriptProperties().getProperty('PLACES_API_KEY');
+  if (!key) { alert_('No Places API key yet. Use Bean There → Set up monthly closed-place check first.'); return; }
+  var ss = SpreadsheetApp.getActive(), today = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'd MMM yyyy');
+  var cache = placeCache_(ss), closed = [], temp = [], reopened = [], unsure = [], ranks = [], checked = 0;
+
+  for (var s = 0; s < CHECK_TABS.length; s++) {
+    var sh = sheetByName_(ss, CHECK_TABS[s]);
+    if (!sh) continue;
+    var tab = CHECK_TABS[s], values = sh.getDataRange().getValues();
+    var head = values[0].map(function (h) { return String(h).toLowerCase().replace(/[^a-z]/g, ''); });
+    var D = head.indexOf('district'), N = head.indexOf('name'), T = head.indexOf('tags'), L = head.indexOf('latlng');
+    if (D === -1 || N === -1 || T === -1) continue;
+
+    var todo = [];
+    for (var i = 1; i < values.length; i++) {
+      var name = String(values[i][N]).trim(), district = String(values[i][D]).trim();
+      var tags = String(values[i][T]).split(';').map(function (x) { return x.trim(); }).filter(String);
+      if (!name || tags.indexOf('closed') !== -1) continue; // already closed: nothing to check
+      var ll = L === -1 ? null : /(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/.exec(String(values[i][L]));
+      todo.push({ row: i + 1, name: name, district: district, tags: tags, ll: ll ? [Number(ll[1]), Number(ll[2])] : null, id: cache.ids[tab + '|' + district + '|' + name] });
+    }
+
+    var rerank = {};
+    for (var b = 0; b < todo.length; b += 20) {
+      var batch = todo.slice(b, b + 20);
+      var replies = UrlFetchApp.fetchAll(batch.map(function (p) { return placeRequest_(p, key); }));
+      for (var j = 0; j < batch.length; j++) {
+        var p = batch[j], code = replies[j].getResponseCode(), body = {};
+        try { body = JSON.parse(replies[j].getContentText()); } catch (err) {}
+        if (code === 403 || code === 401 || (code === 400 && /API key/i.test(JSON.stringify(body)))) {
+          var why = body.error && body.error.message ? body.error.message : 'HTTP ' + code;
+          notify_('Out & About: closed-place check could not run', 'Google refused the Places API key: ' + why + '\n\nSee the README section "Monthly closed-place check" to fix it.');
+          alert_('Google refused the Places API key:\n\n' + why + '\n\nCheck the README section "Monthly closed-place check".');
+          return;
+        }
+        var place = p.id ? body : (body.places && body.places[0]);
+        var label = p.name + ' (' + p.district + ', ' + tab + ')';
+        if (code !== 200 || !place || !place.businessStatus) {
+          if (p.id && code === 404) delete cache.ids[tab + '|' + p.district + '|' + p.name];
+          unsure.push(label); continue;
+        }
+        var gName = place.displayName && place.displayName.text || '';
+        if (!p.id && nameScore_(p.name, gName) < 0.6) { unsure.push(label + ': Google’s closest match was “' + gName + '”'); continue; }
+        cache.ids[tab + '|' + p.district + '|' + p.name] = place.id;
+        checked++;
+        var status = place.businessStatus, hasTemp = p.tags.indexOf('temp-closed') !== -1, nameCell = sh.getRange(p.row, N + 1);
+        if (status === 'CLOSED_PERMANENTLY') {
+          setTags_(sh, p.row, T, p.tags.filter(function (x) { return x !== 'temp-closed'; }).concat('closed'));
+          sh.getRange(p.row, 1, 1, values[0].length).setBackground(CLOSED_BG);
+          nameCell.setNote('Google Maps lists this as permanently closed (checked ' + today + '). If that’s wrong, remove “closed” from its Tags and clear the colour.');
+          closed.push(label); rerank[p.district] = true;
+        } else if (status === 'CLOSED_TEMPORARILY' && !hasTemp) {
+          setTags_(sh, p.row, T, p.tags.concat('temp-closed'));
+          sh.getRange(p.row, 1, 1, values[0].length).setBackground(CLOSED_BG);
+          nameCell.setNote('Google Maps lists this as temporarily closed (checked ' + today + '). The tag is removed automatically when it reopens.');
+          temp.push(label); rerank[p.district] = true;
+        } else if (status === 'OPERATIONAL' && hasTemp) {
+          setTags_(sh, p.row, T, p.tags.filter(function (x) { return x !== 'temp-closed'; }));
+          sh.getRange(p.row, 1, 1, values[0].length).setBackground(null);
+          nameCell.setNote('Reopened: Google Maps lists this as open again (checked ' + today + ').');
+          reopened.push(label); rerank[p.district] = true;
+        }
+      }
+    }
+    if (Object.keys(rerank).length) ranks = ranks.concat(autoRank_(sh, rerank).map(function (c) { return tab + ' · ' + c; }));
+  }
+  savePlaceCache_(cache);
+
+  var lines = ['Checked ' + checked + ' places on Google Maps (' + today + ').'];
+  if (closed.length) lines.push('Permanently closed (tagged “closed”, hidden from recommendations):\n• ' + closed.join('\n• '));
+  if (temp.length) lines.push('Temporarily closed (tagged “temp-closed”):\n• ' + temp.join('\n• '));
+  if (reopened.length) lines.push('Open again (“temp-closed” removed):\n• ' + reopened.join('\n• '));
+  if (ranks.length) lines.push('Ranks updated:\n• ' + ranks.join('\n• '));
+  if (!closed.length && !temp.length && !reopened.length) lines.push('Nothing has closed. 🎉');
+  if (unsure.length) lines.push('Couldn’t check these (no clear match on Google Maps). Fill in their Lat, Lng or check them yourself:\n• ' + unsure.join('\n• '));
+  var msg = lines.join('\n\n');
+  notify_('Out & About: monthly closed-place check', msg + '\n\nThe sites pick up changes within about 5 minutes.');
+  alert_(msg);
+}
+
+function placeRequest_(p, key) {
+  if (p.id) {
+    return { url: 'https://places.googleapis.com/v1/places/' + encodeURIComponent(p.id), method: 'get', muteHttpExceptions: true,
+      headers: { 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'id,displayName,businessStatus' } };
+  }
+  var body = { textQuery: p.name + ', ' + p.district + ', Hong Kong', regionCode: 'HK', pageSize: 1 };
+  if (p.ll) body.locationBias = { circle: { center: { latitude: p.ll[0], longitude: p.ll[1] }, radius: 500 } };
+  return { url: 'https://places.googleapis.com/v1/places:searchText', method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify(body), headers: { 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'places.id,places.displayName,places.businessStatus' } };
+}
+
+function setTags_(sh, row, col, tags) {
+  sh.getRange(row, col + 1).setValue(tags.filter(function (x, i) { return tags.indexOf(x) === i; }).join(';'));
+}
+
+// Remembers each place's Google ID in a hidden "_places" tab, so later checks are exact and cheaper.
+function placeCache_(ss) {
+  var sh = sheetByName_(ss, '_places'), ids = {};
+  if (sh && sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues().forEach(function (r) { if (r[0]) ids[r[0]] = r[1]; });
+  return { sheet: sh, ids: ids };
+}
+
+function savePlaceCache_(cache) {
+  var sh = cache.sheet || SpreadsheetApp.getActive().insertSheet('_places').hideSheet();
+  var rows = [['Key', 'Google Place ID']];
+  Object.keys(cache.ids).forEach(function (k) { rows.push([k, cache.ids[k]]); });
+  sh.clear();
+  sh.getRange(1, 1, rows.length, 2).setNumberFormat('@').setValues(rows);
 }
 
 // One entry per café. Handles merged cells and cafés that span several rows.

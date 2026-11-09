@@ -21,7 +21,7 @@
   ];
   var MAX_STOPS = 5;
 
-  var TAGS = { "work-friendly": "💻 Work-friendly", "takeaway-only": "🥡 Takeaway only", "small-space": "🤏 Small space", "cheap": "💸 Great value", "pricey": "💎 Pricey", "cash-only": "💵 Cash/Octopus", "closed": "🚫 Closed", "cozy": "🛋️ Cozy", "cute": "🌸 Cute", "no-ports": "🔌 No ports", "time-limit": "⏱️ Time limit", "small-portion": "🥄 Small portion" };
+  var TAGS = { "work-friendly": "💻 Work-friendly", "takeaway-only": "🥡 Takeaway only", "small-space": "🤏 Small space", "cheap": "💸 Great value", "pricey": "💎 Pricey", "cash-only": "💵 Cash/Octopus", "closed": "🚫 Closed", "temp-closed": "⏸️ Temporarily closed", "cozy": "🛋️ Cozy", "cute": "🌸 Cute", "no-ports": "🔌 No ports", "time-limit": "⏱️ Time limit", "small-portion": "🥄 Small portion" };
   var TASTE = { milky: "🥛 Milky", strong: "💪 Strong", smooth: "🫧 Smooth", weak: "💧 Weak", nutty: "🌰 Nutty", chocolatey: "🍫 Chocolatey", fruity: "🍓 Fruity", roasty: "🔥 Roasty" };
   var CAFFEINE = { "Espresso Tonic": 130, "Flat White": 130, "Latte": 130, "Americano": 150, "Matcha": 70, "Other": 110 };
   var DRINKS = ["Espresso Tonic", "Flat White", "Latte", "Matcha", "Americano"];
@@ -145,7 +145,7 @@
       return {
         id: i, district: o.district, name: o.name, rank: isNaN(rank) ? null : rank, rating: isNaN(rating) ? null : rating,
         order: order, drink: drink, price: o.price || "", note: o.note || o.review || "",
-        taste: splitList(o.taste), tags: tags, closed: tags.indexOf("closed") !== -1, maps: o.mapslink || "",
+        taste: splitList(o.taste), tags: tags, closed: tags.indexOf("closed") !== -1 || tags.indexOf("temp-closed") !== -1, maps: o.mapslink || "",
         added: parseDate(o.added || o.dateadded || o.datevisited || o.visited || ""),
         coords: parseCoords(o.latlng || o.coordinates || ((o.lat || o.latitude) && (o.lng || o.lon || o.longitude) ? (o.lat || o.latitude) + "," + (o.lng || o.lon || o.longitude) : ""))
       };
