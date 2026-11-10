@@ -1085,6 +1085,22 @@
     el.textContent = TAGLINES()[S.tagline];
   }, 3500);
 
+  // Bean There now also lives inside Out & About. This banner takes people there, with their saved list.
+  var OUT_AND_ABOUT = "https://amabelnapitu.github.io/out-and-about/";
+  function moveBanner() {
+    if (load("bt-move-hide", false)) return;
+    var bar = document.createElement("div");
+    bar.className = "move-banner";
+    bar.innerHTML = '<span><b>Bean There has a bigger home.</b> Out &amp; About has these cafés plus Putri’s restaurants, bars and desserts.</span><a class="pill solid" id="move-go" href="' + OUT_AND_ABOUT + '">Open Out &amp; About</a><button class="icon-btn" id="move-x" aria-label="Dismiss">✕</button>';
+    document.body.insertBefore(bar, document.getElementById("app"));
+    document.getElementById("move-go").addEventListener("click", function (e) {
+      if (!S.saved.length) return;
+      e.preventDefault();
+      location.href = OUT_AND_ABOUT + "#import/" + S.saved.map(function (k) { var i = k.indexOf("|"); return slug(k.slice(0, i)) + "~" + slug(k.slice(i + 1)); }).join(".");
+    });
+    document.getElementById("move-x").addEventListener("click", function () { save("bt-move-hide", true); bar.remove(); });
+  }
+
   // ---------- Start ----------
 
   document.querySelector(".brand-cup").outerHTML = mascot("brand-cup");
@@ -1111,6 +1127,7 @@
     if (droppedSaved) { S.saved = keep; save("bt-saved", keep); }
     route();
     refreshSummary();
+    moveBanner();
     if (droppedSaved) toast(droppedSaved === 1 ? "A café on your list has closed, so it was removed." : droppedSaved + " cafés on your list have closed, so they were removed.");
     if (!navigator.onLine) toast("You’re offline. Showing the café list saved on this phone.");
   }).catch(function (err) {
